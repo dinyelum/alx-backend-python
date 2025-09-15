@@ -7,6 +7,8 @@ Complete the code below by writing a decorator log_queries that logs the SQL que
 Prototype: def log_queries()
 """
 
+# from datetime import datetime, print()
+
 
 import sqlite3
 import functools
