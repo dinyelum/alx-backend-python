@@ -19,13 +19,6 @@ class TestAccessNestedMap(unittest.TestCase):
         ({"a": {"b": {"c": 1}}}, ['a'], {"b": {"c": 1}}),
     ])
     def test_access_nested_map(self, a, b, expected) -> None:
-        """A method to test that utils' access_nested_map returns what it is supposed to.
-
-        Args:
-            a (tuple): First item from each parameterized row.
-            b (dict): Second item from each parameterized row.
-            expected (Any): Third item from each parameterized row.
-        """
         self.assertEqual(utils.access_nested_map(a, b), expected)
 
     @parameterized.expand([
