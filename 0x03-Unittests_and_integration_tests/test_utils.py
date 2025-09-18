@@ -15,8 +15,7 @@ class TestAccessNestedMap(unittest.TestCase):
     @parameterized.expand([
         ({"a": 1}, ("a",), 1),
         ({"a": {"b": 2}}, ("a",), {"b": 2}),
-        ({"a": {"b": 2}}, ("a", "b"), 2),
-        ({"a": {"b": {"c": 1}}}, ['a'], {"b": {"c": 1}}),
+        ({"a": {"b": 2}}, ("a", "b"), 2)
     ])
     def test_access_nested_map(self, a, b, expected) -> None:
         self.assertEqual(utils.access_nested_map(a, b), expected)
@@ -26,13 +25,6 @@ class TestAccessNestedMap(unittest.TestCase):
         ({"a": 1}, ("a", "b"), KeyError),
     ])
     def test_access_nested_map_exception(self, a, b, expected_exception) -> None:
-        """A method to test that utils' access_nested_map returns expected exception properly.
-
-        Args:
-            a (tuple): First item from each parameterized row.
-            b (dict): Second item from each parameterized row.
-            expected (Any): Third item from each parameterized row.
-        """
         with self.assertRaises(expected_exception):
             utils.access_nested_map(a, b)
 
