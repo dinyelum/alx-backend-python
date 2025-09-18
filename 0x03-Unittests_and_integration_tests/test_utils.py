@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
+"""A test module for Utils
+"""
 import unittest
 from unittest.mock import patch
 import utils
 from parameterized import parameterized, param
+from typing import List, Dict, Set, Tuple, Optional
 memoize = utils.memoize
 
 
@@ -15,7 +18,7 @@ class TestAccessNestedMap(unittest.TestCase):
         ({"a": {"b": 2}}, ("a", "b"), 2),
         ({"a": {"b": {"c": 1}}}, ['a'], {"b": {"c": 1}}),
     ])
-    def test_access_nested_map(self, a, b, expected):
+    def test_access_nested_map(self, a, b, expected) -> None:
         """A method to test that utils' access_nested_map returns what it is supposed to.
 
         Args:
@@ -29,7 +32,7 @@ class TestAccessNestedMap(unittest.TestCase):
         ({}, ("a",), KeyError),
         ({"a": 1}, ("a", "b"), KeyError),
     ])
-    def test_access_nested_map_exception(self, a, b, expected_exception):
+    def test_access_nested_map_exception(self, a, b, expected_exception) -> None:
         """A method to test that utils' access_nested_map returns expected exception properly.
 
         Args:
@@ -45,7 +48,7 @@ class TestGetJson(unittest.TestCase):
     """A class to test utils' get_json method 
     """
 
-    def test_get_json(self):
+    def test_get_json(self) -> None:
         """A method to Mock test HTTP calls made by utils' get_json method 
         """
         with patch("utils.requests.get") as mocked_get:
@@ -75,7 +78,7 @@ class TestMemoize(unittest.TestCase):
     """A class to test utils' memoize
     """
 
-    def test_memoize(self):
+    def test_memoize(self) -> None:
         """A method to test that when calling TestClass' a_property twice, the correct result is returned but TestClass' a_method is only called once.
         """
         class TestClass:
