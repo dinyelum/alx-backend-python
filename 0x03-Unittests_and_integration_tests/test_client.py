@@ -119,7 +119,8 @@ class TestIntegrationGithubOrgClient(unittest.TestCase):
 
         # Define side effect function to return different payloads based on URL
         def side_effect(url, *args, **kwargs):
-            """Side effect function to return appropriate payload based on URL"""
+            """Side effect function to return appropriate payload based on URL
+            """
             class MockResponse:
                 def __init__(self, json_data):
                     self.json_data = json_data
