@@ -18,7 +18,8 @@ class TestAccessNestedMap(unittest.TestCase):
         ({"a": {"b": 2}}, ("a", "b"), 2)
     ])
     def test_access_nested_map(self, a, b, expected) -> None:
-        """A method to test that utils' access_nested_map method returns expected value"""
+        """A method to test that utils' access_nested_map method returns
+        expected value"""
         self.assertEqual(utils.access_nested_map(a, b), expected)
 
     @parameterized.expand([
@@ -26,16 +27,20 @@ class TestAccessNestedMap(unittest.TestCase):
         ({"a": 1}, ("a", "b"), KeyError),
     ])
     def test_access_nested_map_exception(self, a, b, expected_exception) -> None:
+        """
+        A method to test that utils' access_nested_map method returns
+        expected exception
+        """
         with self.assertRaises(expected_exception):
             utils.access_nested_map(a, b)
 
 
 class TestGetJson(unittest.TestCase):
-    """A class to test utils' get_json method 
+    """A class to test utils' get_json method
     """
 
     def test_get_json(self) -> None:
-        """A method to Mock test HTTP calls made by utils' get_json method 
+        """A method to Mock test HTTP calls made by utils' get_json method
         """
         with patch("utils.requests.get") as mocked_get:
             test_params = [
@@ -59,7 +64,7 @@ class TestMemoize(unittest.TestCase):
     """
 
     def test_memoize(self) -> None:
-        """A method to test that when calling TestClass' a_property twice, 
+        """A method to test that when calling TestClass' a_property twice,
         the correct result is returned but TestClass' a_method is only called once.
         """
         class TestClass:
