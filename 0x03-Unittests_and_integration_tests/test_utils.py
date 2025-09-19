@@ -37,26 +37,20 @@ class TestGetJson(unittest.TestCase):
         """A method to Mock test HTTP calls made by utils' get_json method 
         """
         with patch("utils.requests.get") as mocked_get:
-            test_url = "http://example.com"
-            test_payload = {"payload": True}
+            test_params = [
+                {"url": "http://example.com", "payload": {"payload": True}},
+                {"url": "http://holberton.io", "payload": {"payload": False}}
+            ]
 
-            mocked_get.json.return_value = test_payload
-            mocked_get.return_value = mocked_get
+            for url, payload in test_params:
+                mocked_get.json.return_value = payload
+                mocked_get.return_value = mocked_get
 
-            mock_run = utils.get_json(test_url)
-            mocked_get.assert_called_once_with(test_url)
-            self.assertEqual(mock_run, test_payload)
+                mock_run = utils.get_json(url)
+                mocked_get.assert_called_once_with(url)
+                self.assertEqual(mock_run, payload)
 
-            mocked_get.reset_mock()
-            test_url = "http://holberton.io"
-            test_payload = {"payload": False}
-
-            mocked_get.json.return_value = test_payload
-            mocked_get.return_value = mocked_get
-
-            mock_run = utils.get_json(test_url)
-            mocked_get.assert_called_once_with(test_url)
-            self.assertEqual(mock_run, test_payload)
+                mocked_get.reset_mock()
 
 
 class TestMemoize(unittest.TestCase):
