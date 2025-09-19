@@ -10,13 +10,17 @@ from unittest.mock import PropertyMock
 
 
 class TestGithubOrgClient(unittest.TestCase):
+    """A class to test that client's org, public_repos_url,
+    public_repos and has_license are working as expected
+    """
     @parameterized.expand([
         ('google',),
         ('abc',),
     ])
     @patch('client.get_json')
     def test_org(self, org_name, mock_fetch_data):
-        """A method to test that client's GithubOrgClient.org returns the correct value."""
+        """A method to test that client's GithubOrgClient.org returns
+        the correct value."""
         mock_fetch_data.return_value = {"payload": True}
         instance = client.GithubOrgClient(org_name)
         result = instance.org
@@ -32,7 +36,8 @@ class TestGithubOrgClient(unittest.TestCase):
         self.assertEqual(result2, {"payload": True})
 
     def test_public_repos_url(self):
-        """A method to test that client's GithubOrgClient._public_repos_url returns the correct value."""
+        """A method to test that client's GithubOrgClient._public_repos_url
+        returns the correct value."""
         instance = client.GithubOrgClient('google')
         test_payload = {
             "repos_url": "https://api.github.com/orgs/testorg/repos",
@@ -53,9 +58,14 @@ class TestGithubOrgClient(unittest.TestCase):
 
     @patch("client.get_json", return_value=test_repos_payload)
     def test_public_repos(self, mocked_get_json):
-        """A method to test that client's GithubOrgClient.public_repos returns the correct value."""
+        """A method to test that client's GithubOrgClient.public_repos
+        returns the correct value."""
         test_repos_url = "https://api.github.com/orgs/testorg/repos"
-        with patch.object(client.GithubOrgClient, '_public_repos_url', new_callable=PropertyMock, return_value=test_repos_url) as mocked_repo_url:
+        with patch.object(
+            client.GithubOrgClient,
+            '_public_repos_url',
+            new_callable=PropertyMock,
+                return_value=test_repos_url) as mocked_repo_url:
             instance = client.GithubOrgClient('google')
             result = instance.public_repos()
 
@@ -72,7 +82,8 @@ class TestGithubOrgClient(unittest.TestCase):
         ({"license": {"key": "other_license"}}, "my_license", False)
     ])
     def test_has_license(self, a, b, c):
-        """A method to test that client.GithubOrgClient.has_license returns expected value"""
+        """A method to test that client.GithubOrgClient.has_license
+        returns expected value"""
         with patch.object(client.GithubOrgClient, 'has_license', return_value=c):
             instance = client.GithubOrgClient('testorg')
             result = instance.has_license(repo=a, license_key=b)
