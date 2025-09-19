@@ -29,7 +29,8 @@ class TestGithubOrgClient(unittest.TestCase):
         expected_url = 'https://api.github.com/orgs/'+org_name
         mock_fetch_data.assert_called_once_with(expected_url)
 
-        # Verify the result is cached (call org again and ensure get_json not called again)
+        # Verify the result is cached (call org again and ensure
+        # get_json not called again)
         result2 = instance.org
         # Still only called once due to memoization
         mock_fetch_data.assert_called_once()
@@ -44,7 +45,10 @@ class TestGithubOrgClient(unittest.TestCase):
             "login": "testorg",
             "id": 237
         }
-        with patch.object(client.GithubOrgClient, 'org', new_callable=PropertyMock) as mock_org:
+        with patch.object(
+            client.GithubOrgClient,
+            'org',
+                new_callable=PropertyMock) as mock_org:
             mock_org.return_value = test_payload
             result = instance._public_repos_url
             self.assertEqual(result, test_payload["repos_url"])
@@ -84,7 +88,10 @@ class TestGithubOrgClient(unittest.TestCase):
     def test_has_license(self, a, b, c):
         """A method to test that client.GithubOrgClient.has_license
         returns expected value"""
-        with patch.object(client.GithubOrgClient, 'has_license', return_value=c):
+        with patch.object(
+            client.GithubOrgClient,
+            'has_license',
+                return_value=c):
             instance = client.GithubOrgClient('testorg')
             result = instance.has_license(repo=a, license_key=b)
             self.assertEqual(result, c)
