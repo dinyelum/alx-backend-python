@@ -2,7 +2,7 @@
 """A test module for Utils
 """
 import unittest
-from unittest.mock import patch, Mock
+from unittest.mock import patch
 import utils
 from parameterized import parameterized, param
 from typing import List, Dict, Set, Tuple, Optional
@@ -50,12 +50,8 @@ class TestGetJson(unittest.TestCase):
             ]
 
             for url, payload in test_params:
-                mock_response = Mock()
-                mock_response.json.return_value = payload
-                mocked_get.return_value = mock_response
-
-                # mocked_get.json.return_value = payload
-                # mocked_get.return_value = mocked_get
+                mocked_get.json.return_value = payload
+                mocked_get.return_value = mocked_get
 
                 mock_run = utils.get_json(url)
                 mocked_get.assert_called_once_with(url)
@@ -70,7 +66,7 @@ class TestMemoize(unittest.TestCase):
 
     def test_memoize(self) -> None:
         """A method to test that when calling TestClass' a_property twice,
-        the correct result is returned but TestClass' a_method is 
+        the correct result is returned but TestClass' a_method is
         only called once.
         """
         class TestClass:
