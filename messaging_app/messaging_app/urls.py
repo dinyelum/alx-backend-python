@@ -19,6 +19,8 @@ from django.urls import path, include
 
 urlpatterns = [
     path('admin/', admin.site.urls),
-    path('', include('chats.urls')),  # Normal include
-    path('api/', include('chats.urls')),  # Explicit api/ path for grading
+    path('', include('chats.urls')),
+    path('api/', include('chats.urls')),  # Explicit api/ path
+    # Add api-auth for DRF browsable API
+    path('api-auth/', include('rest_framework.urls')),
 ]
