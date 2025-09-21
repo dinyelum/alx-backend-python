@@ -46,6 +46,12 @@ class ConversationViewSet(viewsets.ModelViewSet):
         # Creation is handled in the serializer's create method
         serializer.save()
 
+    def get_serializer_context(self):
+        """Add request to serializer context"""
+        context = super().get_serializer_context()
+        context['request'] = self.request
+        return context
+
     @action(detail=True, methods=['get'])
     def messages(self, request, pk=None):
         """Get all messages for a specific conversation"""
@@ -54,7 +60,8 @@ class ConversationViewSet(viewsets.ModelViewSet):
             conversation=conversation
         ).select_related('sender').order_by('sent_at')
 
-        serializer = MessageSerializer(messages, many=True)
+        serializer = MessageSerializer(
+            messages, many=True, context={'request': request})
         return Response(serializer.data)
 
 
