@@ -1,13 +1,13 @@
 # urls.py
 from django.urls import path, include
-from rest_framework.routers import DefaultRouter
+from rest_framework import routers
 from chats import views
 
-routers = DefaultRouter()
-routers.register(r'conversations', views.ConversationViewSet,
-                 basename='conversation')
-routers.register(r'messages', views.MessageViewSet, basename='message')
+router = routers.DefaultRouter()
+router.register(r'conversations', views.ConversationViewSet,
+                basename='conversation')
+router.register(r'messages', views.MessageViewSet, basename='message')
 
 urlpatterns = [
-    path('api/', include(routers.urls)),
+    path('api/', include(router.urls)),
 ]
