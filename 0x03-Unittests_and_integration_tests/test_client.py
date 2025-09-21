@@ -96,8 +96,6 @@ class TestGithubOrgClient(unittest.TestCase):
             result = instance.has_license(repo=a, license_key=b)
             self.assertEqual(result, c)
 
-# @parameterized_class
-
 
 @parameterized([
     {
