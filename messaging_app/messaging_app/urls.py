@@ -17,20 +17,6 @@ Including another URLconf
 from django.contrib import admin
 from django.urls import path
 
-# urls.py
-from django.urls import path, include
-from rest_framework.routers import DefaultRouter
-from chats import views
-
-router = DefaultRouter()
-router.register(r'conversations', views.ConversationViewSet,
-                basename='conversation')
-router.register(r'messages', views.MessageViewSet, basename='message')
-
 urlpatterns = [
-    path('api/', include(router.urls)),
+    path('admin/', admin.site.urls),
 ]
-
-# urlpatterns = [
-#     path('admin/', admin.site.urls),
-# ]
