@@ -11,13 +11,10 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
 from pathlib import Path
-from datetime import timedelta, time
-import os
+from datetime import timedelta
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
-
-REQUEST_LOG_FILE = os.path.join(BASE_DIR, 'requests.log')
 
 
 # Quick-start development settings - unsuitable for production
@@ -50,31 +47,12 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
-    'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
-    # If you have the logging middleware
-    'chats.middleware.RequestLoggingMiddleware',
-    'chats.middleware.RestrictAccessByTimeMiddleware',
 ]
-
-# Optional: Customize restriction settings (if using the enhanced version)
-RESTRICTED_START_TIME = time(21, 0)  # 9:00 PM
-RESTRICTED_END_TIME = time(6, 0)     # 6:00 AM
-
-RESTRICTED_PATHS = [
-    r'^/messages/',
-    r'^/chat/',
-    r'^/messaging/',
-    r'^/api/chat/',
-    r'^/api/messages/',
-    # Add any other messaging-related paths
-]
-
-RESTRICTED_ACCESS_MESSAGE = "Messaging services are unavailable from 9:00 PM to 6:00 AM."
 
 ROOT_URLCONF = 'messaging_app.urls'
 
