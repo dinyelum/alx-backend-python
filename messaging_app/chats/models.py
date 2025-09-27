@@ -52,6 +52,17 @@ class User(AbstractBaseUser):
     def __str__(self):
         return f"{self.first_name} {self.last_name} ({self.email})"
 
+    @property
+    def is_authenticated(self):
+        return True
+
+    # Add these methods for JWT compatibility
+    def get_username(self):
+        return self.email
+
+    def __str__(self):
+        return self.email
+
 
 class Conversation(models.Model):
     conversation_id = models.UUIDField(
@@ -73,6 +84,8 @@ class Message(models.Model):
         Conversation, on_delete=models.CASCADE, related_name='messages')
     sender = models.ForeignKey(
         User, on_delete=models.CASCADE, related_name='sent_messages')
+    receiver = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name='received_messages')
     message_body = models.TextField(null=False)
     sent_at = models.DateTimeField(auto_now_add=True)
 

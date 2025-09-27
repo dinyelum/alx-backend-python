@@ -1,8 +1,9 @@
 # urls.py
 from django.urls import path, include
+from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from rest_framework import routers
 from rest_framework_extensions.routers import NestedRouterMixin
-from chats import views
+from chats.views import ConversationViewSet, MessageViewSet
 
 # Create NestedDefaultRouter
 
@@ -12,11 +13,11 @@ class NestedDefaultRouter(NestedRouterMixin, routers.DefaultRouter):
 
 
 router = NestedDefaultRouter()
-conversations_router = router.register(r'conversations', views.ConversationViewSet,
-                                       basename='conversation')
-conversations_router.register(r'messages', views.MessageViewSet,
-                              basename='conversation-messages', parents_query_lookups=['conversation'])
+router.register(r'conversations', ConversationViewSet, basename='conversation')
+router.register(r'messages', MessageViewSet, basename='message')
 
 urlpatterns = [
+    path('api/token/', TokenObtainPairView.as_view(), name='token_obtain_pair'),
+    path('api/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
     path('api/', include(router.urls)),
 ]
