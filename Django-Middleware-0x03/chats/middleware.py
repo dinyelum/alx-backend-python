@@ -203,94 +203,45 @@ class OffensiveLanguageMiddleware:
         return self.time_window
 
 
-class RolePermissionMiddleware:
+class RolepermissionMiddleware:
     """
     Middleware that checks the user's role before allowing access to specific actions.
-    Only allows admin or moderator roles to access protected endpoints.
+    If the user is not admin or moderator, it returns error 403.
     """
 
     def __init__(self, get_response):
         self.get_response = get_response
 
-        # Define admin/moderator protected paths and actions
-        self.protected_paths = [
+        # Paths that require admin/moderator access
+        self.admin_paths = [
             r'^/admin/',
             r'^/moderator/',
             r'^/api/admin/',
-            r'^/api/moderator/',
-            r'^/user/delete/',
-            r'^/user/ban/',
-            r'^/message/delete/',
-            r'^/chat/clear/',
         ]
 
-        # Define HTTP methods that require admin/mod permissions
-        self.protected_methods = ['POST', 'PUT', 'DELETE', 'PATCH']
-
-        # Allowed roles (customize based on your user model)
-        self.allowed_roles = ['admin', 'moderator', 'superuser']
-
     def __call__(self, request):
-        # Check if the request is to a protected path with protected method
-        if (self.is_protected_path(request.path) and
-                request.method in self.protected_methods):
+        # Check if path requires admin permissions
+        if self.requires_admin_permission(request.path):
+            user = request.user
 
-            # Check user authentication and role
-            if not self.has_permission(request):
-                return self.permission_denied_response(request)
+            # Check if user is authenticated and has admin/moderator role
+            if not user.is_authenticated or not self.is_admin_or_moderator(user):
+                return HttpResponseForbidden(
+                    "<h1>403 Forbidden</h1>"
+                    "<p>Admin or moderator role required to access this resource.</p>"
+                )
 
-        # Process the request normally if permission is granted
-        response = self.get_response(request)
-        return response
+        return self.get_response(request)
 
-    def is_protected_path(self, path):
-        """Check if the requested path matches any protected patterns"""
-        for pattern in self.protected_paths:
-            if re.match(pattern, path):
-                return True
-        return False
+    def requires_admin_permission(self, path):
+        """Check if the path requires admin permissions"""
+        return any(re.match(pattern, path) for pattern in self.admin_paths)
 
-    def has_permission(self, request):
-        """
-        Check if user has required role (admin or moderator)
-        Assumes user model has a 'role' field or uses Django's built-in is_staff/is_superuser
-        """
-        # Check if user is authenticated
-        if not hasattr(request, 'user') or not request.user.is_authenticated:
-            return False
+    def is_admin_or_moderator(self, user):
+        """Check if user has admin or moderator role"""
+        # Check role field
+        if hasattr(user, 'role'):
+            return user.role.lower() in ['admin', 'moderator', 'superuser']
 
-        # Method 1: Check if user has a role field
-        if hasattr(request.user, 'role'):
-            user_role = getattr(request.user, 'role', '').lower()
-            return user_role in self.allowed_roles
-
-        # Method 2: Check Django's built-in admin flags
-        elif hasattr(request.user, 'is_superuser') and request.user.is_superuser:
-            return True
-        elif hasattr(request.user, 'is_staff') and request.user.is_staff:
-            return True
-
-        # Method 3: Check groups (if using Django's group system)
-        elif hasattr(request.user, 'groups'):
-            group_names = request.user.groups.values_list('name', flat=True)
-            for group_name in group_names:
-                if group_name.lower() in self.allowed_roles:
-                    return True
-
-        return False
-
-    def permission_denied_response(self, request):
-        """Return appropriate 403 Forbidden response"""
-        if request.headers.get('Content-Type') == 'application/json' or request.path.startswith('/api/'):
-            return JsonResponse({
-                'error': 'Permission denied',
-                'message': 'You do not have sufficient permissions to perform this action.',
-                'required_roles': self.allowed_roles
-            }, status=403)
-        else:
-            return HttpResponseForbidden(
-                "<h1>403 Forbidden</h1>"
-                "<p>You do not have permission to access this resource.</p>"
-                "<p>Required roles: Admin or Moderator</p>"
-                "<p>Please contact system administrator if you believe this is an error.</p>"
-            )
+        # Check Django built-in permissions
+        return user.is_superuser or user.is_staff
