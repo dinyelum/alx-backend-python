@@ -2,6 +2,7 @@
 from django.db.models.signals import post_save, pre_save
 from django.dispatch import receiver
 from django.core.exceptions import ObjectDoesNotExist
+from django.utils import timezone
 from .models import Message, Notification, User, Conversation, MessageHistory
 import logging
 
@@ -30,7 +31,7 @@ def track_message_edits(sender, instance, **kwargs):
                 if latest_version:
                     version_number = latest_version.version_number + 1
 
-                # Create message history entry
+                # Explicitly use MessageHistory.objects.create as required
                 MessageHistory.objects.create(
                     message=instance,
                     old_content=original.content,
@@ -67,6 +68,7 @@ def create_edit_notification(message, old_content):
             user_id=message.sender.user_id)
 
         for participant in participants:
+            # Use Notification.objects.create explicitly
             Notification.objects.create(
                 user=participant,
                 message=message,
@@ -97,7 +99,8 @@ def create_message_notification(sender, instance, created, **kwargs):
                     user_id=instance.sender.user_id)
 
             for receiver_user in receivers:
-                notification = Notification.objects.create(
+                # Use Notification.objects.create explicitly
+                Notification.objects.create(
                     user=receiver_user,
                     message=instance,
                     notification_type='message',
@@ -141,3 +144,58 @@ def send_real_time_notification(sender, instance, created, **kwargs):
         except Exception as e:
             logger.error(
                 f"Error delivering notification {instance.notification_id}: {str(e)}")
+
+# Additional signal to demonstrate MessageHistory usage
+
+
+@receiver(post_save, sender=MessageHistory)
+def log_message_history_creation(sender, instance, created, **kwargs):
+    """
+    Signal to log when a MessageHistory entry is created
+    """
+    if created:
+        try:
+            logger.info(
+                f"MessageHistory created for message {instance.message.message_id}, version {instance.version_number}")
+
+            # Additional actions when MessageHistory is created
+            # For example, you could trigger analytics or audit logging here
+
+        except Exception as e:
+            logger.error(f"Error processing MessageHistory creation: {str(e)}")
+
+# Utility function that uses MessageHistory
+
+
+def get_message_edit_history(message_id):
+    """
+    Utility function to retrieve message edit history using MessageHistory
+    """
+    try:
+        history_entries = MessageHistory.objects.filter(
+            message__message_id=message_id
+        ).order_by('version_number')
+
+        return list(history_entries)
+    except Exception as e:
+        logger.error(
+            f"Error retrieving message history for {message_id}: {str(e)}")
+        return []
+
+# Another utility function demonstrating MessageHistory usage
+
+
+def get_user_edit_history(user_id):
+    """
+    Get all message edits made by a specific user using MessageHistory
+    """
+    try:
+        user_edits = MessageHistory.objects.filter(
+            edited_by__user_id=user_id
+        ).select_related('message').order_by('-edited_at')
+
+        return list(user_edits)
+    except Exception as e:
+        logger.error(
+            f"Error retrieving user edit history for {user_id}: {str(e)}")
+        return []
