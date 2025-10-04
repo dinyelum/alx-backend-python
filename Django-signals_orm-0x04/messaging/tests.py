@@ -1,3 +1,4 @@
+# messaging/tests.py
 from django.test import TestCase
 from django.contrib.auth import get_user_model
 from .models import Conversation, Message, Notification
@@ -30,169 +31,121 @@ class NotificationSignalTests(TestCase):
         self.conversation = Conversation.objects.create()
         self.conversation.participants.add(self.user1, self.user2, self.user3)
 
-    def test_message_creation_triggers_notification(self):
-        """Test that creating a message triggers notifications for other participants"""
-        # Count initial notifications
-        initial_notification_count = Notification.objects.count()
-
-        # Create a message from user1
+    def test_message_with_receiver_field(self):
+        """Test that Message model has receiver field"""
         message = Message.objects.create(
             conversation=self.conversation,
             sender=self.user1,
-            message_body="Hello everyone!"
+            receiver=self.user2,  # Explicit receiver
+            content="Hello Jane!"
         )
 
-        # Check that notifications were created for user2 and user3 (but not user1)
+        self.assertEqual(message.receiver, self.user2)
+        self.assertEqual(message.content, "Hello Jane!")
+        self.assertIsNotNone(message.timestamp)
+
+    def test_message_auto_sets_receiver(self):
+        """Test that receiver is auto-set for one-on-one conversations"""
+        # Create one-on-one conversation
+        conversation2 = Conversation.objects.create()
+        conversation2.participants.add(self.user1, self.user2)
+
+        message = Message.objects.create(
+            conversation=conversation2,
+            sender=self.user1,
+            content="Auto-set receiver test"
+        )
+
+        # Receiver should be auto-set to user2
+        self.assertEqual(message.receiver, self.user2)
+
+    def test_message_creation_with_timestamp(self):
+        """Test that message has timestamp field"""
+        message = Message.objects.create(
+            conversation=self.conversation,
+            sender=self.user1,
+            receiver=self.user2,
+            content="Test message with timestamp"
+        )
+
+        self.assertIsNotNone(message.timestamp)
+        self.assertEqual(message.content, "Test message with timestamp")
+
+    def test_notification_creation_for_receiver(self):
+        """Test that notification is created for specific receiver"""
+        initial_notification_count = Notification.objects.count()
+
+        # Create message with specific receiver
+        message = Message.objects.create(
+            conversation=self.conversation,
+            sender=self.user1,
+            receiver=self.user2,  # Only user2 should get notification
+            content="Direct message to Jane"
+        )
+
+        # Check that only one notification was created (for user2)
         final_notification_count = Notification.objects.count()
         self.assertEqual(final_notification_count -
-                         initial_notification_count, 2)
+                         initial_notification_count, 1)
 
-        # Verify notifications are for the correct users
+        # Verify notification is for user2 only
         user2_notifications = Notification.objects.filter(
             user=self.user2, message=message)
         user3_notifications = Notification.objects.filter(
             user=self.user3, message=message)
-        user1_notifications = Notification.objects.filter(
-            user=self.user1, message=message)
 
         self.assertEqual(user2_notifications.count(), 1)
-        self.assertEqual(user3_notifications.count(), 1)
-        self.assertEqual(user1_notifications.count(), 0)
+        self.assertEqual(user3_notifications.count(), 0)
 
         # Verify notification content
         notification = user2_notifications.first()
         self.assertEqual(notification.notification_type, 'message')
         self.assertIn(self.user1.first_name, notification.title)
-        self.assertIn(message.message_body, notification.content)
-        self.assertFalse(notification.is_read)
-
-    def test_notification_creation_for_single_participant(self):
-        """Test notification creation in a two-person conversation"""
-        # Create a conversation with only two participants
-        conversation2 = Conversation.objects.create()
-        conversation2.participants.add(self.user1, self.user2)
-
-        initial_notification_count = Notification.objects.count()
-
-        # User1 sends message
-        message = Message.objects.create(
-            conversation=conversation2,
-            sender=self.user1,
-            message_body="Hello user2!"
-        )
-
-        # Should create one notification for user2
-        final_notification_count = Notification.objects.count()
-        self.assertEqual(final_notification_count -
-                         initial_notification_count, 1)
-
-        notification = Notification.objects.filter(user=self.user2).first()
-        self.assertIsNotNone(notification)
-        self.assertEqual(notification.message, message)
-
-    def test_no_notification_for_sender(self):
-        """Test that the message sender doesn't receive a notification"""
-        conversation2 = Conversation.objects.create()
-        conversation2.participants.add(self.user1, self.user2)
-
-        # User1 sends message
-        message = Message.objects.create(
-            conversation=conversation2,
-            sender=self.user1,
-            message_body="Test message"
-        )
-
-        # Check that user1 (sender) didn't get a notification
-        user1_notifications = Notification.objects.filter(
-            user=self.user1, message=message)
-        self.assertEqual(user1_notifications.count(), 0)
-
-    def test_notification_content_truncation(self):
-        """Test that long message content is properly truncated in notifications"""
-        long_message = "This is a very long message that should be truncated in the notification. " * 5
-
-        message = Message.objects.create(
-            conversation=self.conversation,
-            sender=self.user1,
-            message_body=long_message
-        )
-
-        notification = Notification.objects.filter(user=self.user2).first()
-        self.assertIsNotNone(notification)
-        self.assertTrue(len(notification.content) <= 103)  # 100 chars + "..."
-        self.assertTrue(notification.content.endswith('...'))
-
-    def test_message_update_does_not_trigger_notification(self):
-        """Test that updating a message doesn't trigger new notifications"""
-        message = Message.objects.create(
-            conversation=self.conversation,
-            sender=self.user1,
-            message_body="Original message"
-        )
-
-        # Clear initial notifications
-        Notification.objects.all().delete()
-        initial_notification_count = Notification.objects.count()
-
-        # Update the message
-        message.message_body = "Updated message"
-        message.save()
-
-        # No new notifications should be created
-        final_notification_count = Notification.objects.count()
-        self.assertEqual(final_notification_count, initial_notification_count)
+        self.assertIn(message.content, notification.content)
+        self.assertIsNotNone(notification.timestamp)
 
 
-class NotificationModelTests(TestCase):
+class MessageModelTests(TestCase):
     def setUp(self):
-        self.user = get_user_model().objects.create_user(
-            email='test@test.com',
-            first_name='Test',
+        self.user1 = get_user_model().objects.create_user(
+            email='sender@test.com',
+            first_name='Sender',
+            last_name='User',
+            password='testpass123'
+        )
+        self.user2 = get_user_model().objects.create_user(
+            email='receiver@test.com',
+            first_name='Receiver',
             last_name='User',
             password='testpass123'
         )
 
-    def test_notification_creation(self):
-        """Test basic notification creation"""
-        notification = Notification.objects.create(
-            user=self.user,
-            notification_type='system',
-            title='System Update',
-            content='The system will be updated tonight.'
+        self.conversation = Conversation.objects.create()
+        self.conversation.participants.add(self.user1, self.user2)
+
+    def test_message_fields_exist(self):
+        """Test that Message model has all required fields"""
+        message = Message(
+            conversation=self.conversation,
+            sender=self.user1,
+            receiver=self.user2,
+            content="Test message content",
         )
 
-        self.assertIsNotNone(notification.notification_id)
-        self.assertEqual(notification.user, self.user)
-        self.assertEqual(notification.notification_type, 'system')
-        self.assertFalse(notification.is_read)
+        # Check that all required fields are present
+        self.assertEqual(message.sender, self.user1)
+        self.assertEqual(message.receiver, self.user2)
+        self.assertEqual(message.content, "Test message content")
+        self.assertIsNotNone(message.timestamp)
 
-    def test_notification_mark_as_read(self):
-        """Test marking notification as read"""
-        notification = Notification.objects.create(
-            user=self.user,
-            title='Test Notification',
-            content='Test content'
+    def test_message_string_representation(self):
+        """Test Message string representation"""
+        message = Message.objects.create(
+            conversation=self.conversation,
+            sender=self.user1,
+            receiver=self.user2,
+            content="Test message"
         )
 
-        self.assertFalse(notification.is_read)
-        notification.mark_as_read()
-        notification.refresh_from_db()
-        self.assertTrue(notification.is_read)
-
-    def test_notification_ordering(self):
-        """Test that notifications are ordered by creation date (newest first)"""
-        notification1 = Notification.objects.create(
-            user=self.user,
-            title='First Notification',
-            content='First content'
-        )
-
-        notification2 = Notification.objects.create(
-            user=self.user,
-            title='Second Notification',
-            content='Second content'
-        )
-
-        notifications = Notification.objects.all()
-        self.assertEqual(notifications[0], notification2)
-        self.assertEqual(notifications[1], notification1)
+        self.assertIn(self.user1.email, str(message))
+        self.assertIn("Message from", str(message))

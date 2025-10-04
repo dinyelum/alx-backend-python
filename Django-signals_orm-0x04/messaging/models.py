@@ -1,3 +1,4 @@
+# messaging/models.py
 import uuid
 from django.db import models
 from django.contrib.auth.models import AbstractBaseUser
@@ -49,16 +50,30 @@ class Message(models.Model):
         Conversation, on_delete=models.CASCADE, related_name='messages')
     sender = models.ForeignKey(
         User, on_delete=models.CASCADE, related_name='sent_messages')
-    message_body = models.TextField()
-    sent_at = models.DateTimeField(auto_now_add=True)
+    # Add receiver field as requested
+    receiver = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name='received_messages', null=True, blank=True)
+    content = models.TextField()  # Changed from message_body to content
+    # Changed from sent_at to timestamp
+    timestamp = models.DateTimeField(auto_now_add=True)
     is_read = models.BooleanField(default=False)
 
     class Meta:
         db_table = 'message'
-        ordering = ['sent_at']
+        ordering = ['timestamp']
 
     def __str__(self):
-        return f"Message from {self.sender.email} at {self.sent_at}"
+        return f"Message from {self.sender.email} at {self.timestamp}"
+
+    def save(self, *args, **kwargs):
+        # Auto-set receiver if not provided (for one-on-one conversations)
+        if not self.receiver and self.conversation:
+            # Set receiver to the first other participant in the conversation
+            other_participants = self.conversation.participants.exclude(
+                user_id=self.sender.user_id)
+            if other_participants.exists():
+                self.receiver = other_participants.first()
+        super().save(*args, **kwargs)
 
 
 class Notification(models.Model):
@@ -79,11 +94,12 @@ class Notification(models.Model):
     title = models.CharField(max_length=255)
     content = models.TextField()
     is_read = models.BooleanField(default=False)
-    created_at = models.DateTimeField(auto_now_add=True)
+    timestamp = models.DateTimeField(
+        auto_now_add=True)  # Added timestamp field
 
     class Meta:
         db_table = 'notification'
-        ordering = ['-created_at']
+        ordering = ['-timestamp']
 
     def __str__(self):
         return f"Notification for {self.user.email}: {self.title}"
