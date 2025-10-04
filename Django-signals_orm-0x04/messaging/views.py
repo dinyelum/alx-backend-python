@@ -1,6 +1,6 @@
 # messaging/views.py
 from rest_framework import viewsets, status, permissions, filters
-from rest_framework.decorators import action
+from rest_framework.decorators import action, api_view
 from rest_framework.response import Response
 from django.db.models import Prefetch, Q, Count
 from django_filters.rest_framework import DjangoFilterBackend
@@ -16,8 +16,70 @@ from .serializers import (
 from .permissions import IsParticipantOfConversation, IsMessageOwner
 from .pagination import MessagePagination, ConversationPagination
 from .filters import MessageFilter, ConversationFilter
+import logging
 
+logger = logging.getLogger(__name__)
 User = get_user_model()
+
+# Create a dedicated delete_user view function
+
+
+@api_view(['POST'])
+def delete_user(request):
+    """
+    View function that allows a user to delete their own account.
+    This will trigger the post_delete signal for cleanup.
+    """
+    if not request.user or not request.user.is_authenticated:
+        return Response(
+            {"error": "Authentication required"},
+            status=status.HTTP_401_UNAUTHORIZED
+        )
+
+    user = request.user
+
+    # Optional: Add confirmation password check for security
+    password = request.data.get('password')
+    if password and not user.check_password(password):
+        return Response(
+            {"error": "Invalid password"},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    # Optional: Add additional validation
+    confirmation = request.data.get('confirmation')
+    if not confirmation:
+        return Response(
+            {"error": "Confirmation required. Send {'confirmation': 'yes'} to confirm account deletion."},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    if confirmation.lower() != 'yes':
+        return Response(
+            {"error": "Invalid confirmation. Send {'confirmation': 'yes'} to confirm account deletion."},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    # Log the deletion for audit purposes
+    logger.info(
+        f"User {user.email} is deleting their account via delete_user view")
+
+    # Store user info for logging after deletion
+    user_email = user.email
+    user_id = user.user_id
+
+    # Delete the user account
+    # The post_delete signal will handle cleanup of related objects
+    user.delete()
+
+    logger.info(f"User account {user_email} ({user_id}) successfully deleted")
+
+    return Response(
+        {
+            "message": "Account successfully deleted. All your data has been removed from our systems."
+        },
+        status=status.HTTP_200_OK
+    )
 
 
 class UserViewSet(viewsets.ModelViewSet):
@@ -35,18 +97,44 @@ class UserViewSet(viewsets.ModelViewSet):
     def delete_account(self, request):
         """
         Custom action to allow users to delete their own account
+        Uses the same logic as the delete_user function
         """
+        if not request.user or not request.user.is_authenticated:
+            return Response(
+                {"error": "Authentication required"},
+                status=status.HTTP_401_UNAUTHORIZED
+            )
+
         user = request.user
 
-        # You might want to add additional validation here
-        # For example, check if the user has any pending transactions, etc.
+        # Optional: Add confirmation
+        confirmation = request.data.get('confirmation')
+        if not confirmation:
+            return Response(
+                {"error": "Confirmation required. Send {'confirmation': 'yes'} to confirm account deletion."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if confirmation.lower() != 'yes':
+            return Response(
+                {"error": "Invalid confirmation. Send {'confirmation': 'yes'} to confirm account deletion."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
         # Log the deletion for audit purposes
-        logger.info(f"User {user.email} is deleting their account")
+        logger.info(
+            f"User {user.email} is deleting their account via delete_account action")
+
+        # Store user info for logging after deletion
+        user_email = user.email
+        user_id = user.user_id
 
         # Delete the user account
         # The post_delete signal will handle cleanup of related objects
         user.delete()
+
+        logger.info(
+            f"User account {user_email} ({user_id}) successfully deleted via delete_account")
 
         return Response(
             {

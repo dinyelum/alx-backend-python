@@ -10,5 +10,6 @@ router.register(r'conversations', views.ConversationViewSet,
 router.register(r'messages', views.MessageViewSet, basename='message')
 
 urlpatterns = [
+    path('api/delete-user/', views.delete_user, name='delete_user'),
     path('api/', include(router.urls)),
 ]
