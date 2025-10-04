@@ -50,25 +50,26 @@ class Message(models.Model):
         Conversation, on_delete=models.CASCADE, related_name='messages')
     sender = models.ForeignKey(
         User, on_delete=models.CASCADE, related_name='sent_messages')
-    # Add receiver field as requested
     receiver = models.ForeignKey(
         User, on_delete=models.CASCADE, related_name='received_messages', null=True, blank=True)
-    content = models.TextField()  # Changed from message_body to content
-    # Changed from sent_at to timestamp
+    content = models.TextField()
     timestamp = models.DateTimeField(auto_now_add=True)
     is_read = models.BooleanField(default=False)
+    # New field to track if message has been edited
+    edited = models.BooleanField(default=False)
+    edited_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         db_table = 'message'
         ordering = ['timestamp']
 
     def __str__(self):
-        return f"Message from {self.sender.email} at {self.timestamp}"
+        edited_indicator = " (edited)" if self.edited else ""
+        return f"Message from {self.sender.email} at {self.timestamp}{edited_indicator}"
 
     def save(self, *args, **kwargs):
         # Auto-set receiver if not provided (for one-on-one conversations)
         if not self.receiver and self.conversation:
-            # Set receiver to the first other participant in the conversation
             other_participants = self.conversation.participants.exclude(
                 user_id=self.sender.user_id)
             if other_participants.exists():
@@ -76,11 +77,36 @@ class Message(models.Model):
         super().save(*args, **kwargs)
 
 
+class MessageHistory(models.Model):
+    """
+    Model to store historical versions of edited messages
+    """
+    history_id = models.UUIDField(
+        primary_key=True, default=uuid.uuid4, editable=False, db_index=True)
+    message = models.ForeignKey(
+        Message, on_delete=models.CASCADE, related_name='history')
+    old_content = models.TextField()
+    new_content = models.TextField()
+    edited_by = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name='message_edits')
+    edited_at = models.DateTimeField(auto_now_add=True)
+    version_number = models.PositiveIntegerField(default=1)
+
+    class Meta:
+        db_table = 'message_history'
+        ordering = ['-edited_at']
+        verbose_name_plural = 'Message histories'
+
+    def __str__(self):
+        return f"History v{self.version_number} for Message {self.message.message_id}"
+
+
 class Notification(models.Model):
     NOTIFICATION_TYPES = [
         ('message', 'New Message'),
         ('system', 'System Notification'),
         ('alert', 'Alert'),
+        ('edit', 'Message Edited'),
     ]
 
     notification_id = models.UUIDField(
@@ -94,8 +120,7 @@ class Notification(models.Model):
     title = models.CharField(max_length=255)
     content = models.TextField()
     is_read = models.BooleanField(default=False)
-    timestamp = models.DateTimeField(
-        auto_now_add=True)  # Added timestamp field
+    timestamp = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         db_table = 'notification'
