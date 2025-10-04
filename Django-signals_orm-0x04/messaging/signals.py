@@ -1,5 +1,5 @@
 # messaging/signals.py
-from django.db.models.signals import post_save, pre_save
+from django.db.models.signals import post_save, pre_save, post_delete
 from django.dispatch import receiver
 from django.core.exceptions import ObjectDoesNotExist
 from django.utils import timezone
@@ -7,6 +7,80 @@ from .models import Message, Notification, User, Conversation, MessageHistory
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+@receiver(post_delete, sender=User)
+def cleanup_user_data(sender, instance, **kwargs):
+    """
+    Signal to automatically clean up all related data when a user is deleted.
+    This handles data that isn't automatically deleted by CASCADE constraints.
+    """
+    try:
+        user_id = instance.user_id
+        logger.info(
+            f"Cleaning up data for deleted user: {instance.email} ({user_id})")
+
+        # 1. Clean up conversations where this user was the only participant
+        # First, get all conversations where this user was a participant
+        user_conversations = Conversation.objects.filter(participants=instance)
+
+        for conversation in user_conversations:
+            remaining_participants = conversation.participants.exclude(
+                user_id=user_id)
+
+            if remaining_participants.count() == 0:
+                # No participants left, delete the conversation
+                logger.info(
+                    f"Deleting empty conversation {conversation.conversation_id}")
+                conversation.delete()
+            else:
+                # Remove user from conversation participants
+                conversation.participants.remove(instance)
+                logger.info(
+                    f"Removed user from conversation {conversation.conversation_id}")
+
+        # 2. Clean up notifications for this user
+        # Notifications should be deleted via CASCADE, but we'll log it
+        notification_count = Notification.objects.filter(user=instance).count()
+        if notification_count > 0:
+            logger.info(
+                f"Deleting {notification_count} notifications for user {user_id}")
+            # These should be deleted by CASCADE, but we explicitly check
+
+        # 3. Clean up MessageHistory where this user was the editor
+        message_history_count = MessageHistory.objects.filter(
+            edited_by=instance).count()
+        if message_history_count > 0:
+            logger.info(
+                f"Deleting {message_history_count} message history entries for user {user_id}")
+            # Update edited_by to NULL or system user if you want to preserve history
+            # For now, we'll let CASCADE handle it if set up, or delete explicitly:
+            MessageHistory.objects.filter(edited_by=instance).delete()
+
+        # 4. Handle messages where this user was the sender or receiver
+        # Update sender/receiver to NULL to preserve message history in conversations
+        sent_messages_count = Message.objects.filter(sender=instance).count()
+        received_messages_count = Message.objects.filter(
+            receiver=instance).count()
+
+        if sent_messages_count > 0:
+            logger.info(
+                f"Updating {sent_messages_count} messages where user was sender")
+            Message.objects.filter(sender=instance).update(
+                sender=None,
+                content="[Message deleted - user account removed]"
+            )
+
+        if received_messages_count > 0:
+            logger.info(
+                f"Updating {received_messages_count} messages where user was receiver")
+            Message.objects.filter(receiver=instance).update(receiver=None)
+
+        logger.info(f"Successfully cleaned up data for deleted user {user_id}")
+
+    except Exception as e:
+        logger.error(
+            f"Error cleaning up data for deleted user {instance.user_id}: {str(e)}")
 
 
 @receiver(pre_save, sender=Message)
@@ -110,7 +184,7 @@ def create_message_notification(sender, instance, created, **kwargs):
                 )
 
                 logger.info(
-                    f"Notification created for user {receiver_user.email}: {notification.title}")
+                    f"Notification created for user {receiver_user.email}")
 
         except Exception as e:
             logger.error(
@@ -130,72 +204,3 @@ def set_receiver_if_not_provided(sender, instance, **kwargs):
                 instance.receiver = other_participants.first()
         except Exception as e:
             logger.error(f"Error setting receiver for message: {str(e)}")
-
-
-@receiver(post_save, sender=Notification)
-def send_real_time_notification(sender, instance, created, **kwargs):
-    """
-    Signal to handle real-time notification delivery when a notification is created.
-    """
-    if created:
-        try:
-            logger.info(
-                f"Real-time notification ready for delivery: {instance.title} to {instance.user.email}")
-        except Exception as e:
-            logger.error(
-                f"Error delivering notification {instance.notification_id}: {str(e)}")
-
-# Additional signal to demonstrate MessageHistory usage
-
-
-@receiver(post_save, sender=MessageHistory)
-def log_message_history_creation(sender, instance, created, **kwargs):
-    """
-    Signal to log when a MessageHistory entry is created
-    """
-    if created:
-        try:
-            logger.info(
-                f"MessageHistory created for message {instance.message.message_id}, version {instance.version_number}")
-
-            # Additional actions when MessageHistory is created
-            # For example, you could trigger analytics or audit logging here
-
-        except Exception as e:
-            logger.error(f"Error processing MessageHistory creation: {str(e)}")
-
-# Utility function that uses MessageHistory
-
-
-def get_message_edit_history(message_id):
-    """
-    Utility function to retrieve message edit history using MessageHistory
-    """
-    try:
-        history_entries = MessageHistory.objects.filter(
-            message__message_id=message_id
-        ).order_by('version_number')
-
-        return list(history_entries)
-    except Exception as e:
-        logger.error(
-            f"Error retrieving message history for {message_id}: {str(e)}")
-        return []
-
-# Another utility function demonstrating MessageHistory usage
-
-
-def get_user_edit_history(user_id):
-    """
-    Get all message edits made by a specific user using MessageHistory
-    """
-    try:
-        user_edits = MessageHistory.objects.filter(
-            edited_by__user_id=user_id
-        ).select_related('message').order_by('-edited_at')
-
-        return list(user_edits)
-    except Exception as e:
-        logger.error(
-            f"Error retrieving user edit history for {user_id}: {str(e)}")
-        return []

@@ -48,10 +48,10 @@ class Message(models.Model):
         primary_key=True, default=uuid.uuid4, editable=False, db_index=True)
     conversation = models.ForeignKey(
         Conversation, on_delete=models.CASCADE, related_name='messages')
-    sender = models.ForeignKey(
-        User, on_delete=models.CASCADE, related_name='sent_messages')
+    sender = models.ForeignKey(User, on_delete=models.SET_NULL,
+                               null=True, blank=True, related_name='sent_messages')
     receiver = models.ForeignKey(
-        User, on_delete=models.CASCADE, related_name='received_messages', null=True, blank=True)
+        User, on_delete=models.SET_NULL, null=True, blank=True, related_name='received_messages')
     content = models.TextField()
     timestamp = models.DateTimeField(auto_now_add=True)
     is_read = models.BooleanField(default=False)
@@ -85,10 +85,10 @@ class MessageHistory(models.Model):
         primary_key=True, default=uuid.uuid4, editable=False, db_index=True)
     message = models.ForeignKey(
         Message, on_delete=models.CASCADE, related_name='history')
+    edited_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True, related_name='message_edits')
     old_content = models.TextField()
     new_content = models.TextField()
-    edited_by = models.ForeignKey(
-        User, on_delete=models.CASCADE, related_name='message_edits')
     edited_at = models.DateTimeField(auto_now_add=True)
     version_number = models.PositiveIntegerField(default=1)
 
@@ -114,7 +114,7 @@ class Notification(models.Model):
     user = models.ForeignKey(
         User, on_delete=models.CASCADE, related_name='notifications')
     message = models.ForeignKey(
-        Message, on_delete=models.CASCADE, related_name='notifications', null=True, blank=True)
+        Message, on_delete=models.CASCADE, related_name='notifications')
     notification_type = models.CharField(
         max_length=20, choices=NOTIFICATION_TYPES, default='message')
     title = models.CharField(max_length=255)
