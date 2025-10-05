@@ -251,6 +251,105 @@ class MessageViewSet(viewsets.ModelViewSet):
         """Automatically set the current user as the sender"""
         serializer.save(sender=self.request.user)
 
+    @action(detail=False, methods=['get'])
+    def unread(self, request):
+        """
+        Get all unread messages for the current user using the custom manager
+        Optimized with .only() to retrieve only necessary fields
+        """
+        # Use the custom manager to get unread messages
+        unread_messages = Message.unread.unread_for_user(request.user)
+
+        # Apply additional filtering if needed
+        conversation_id = request.query_params.get('conversation')
+        if conversation_id:
+            unread_messages = unread_messages.filter(
+                conversation_id=conversation_id)
+
+        # Use .only() to optimize the query further
+        unread_messages = unread_messages.only(
+            'message_id',
+            'content',
+            'timestamp',
+            'sender__user_id',
+            'sender__first_name',
+            'sender__last_name',
+            'conversation__conversation_id',
+            'parent_message_id'
+        )
+
+        # Paginate the results
+        page = self.paginate_queryset(unread_messages)
+        if page is not None:
+            serializer = ThreadedMessageSerializer(
+                page,
+                many=True,
+                context={'request': request, 'max_depth': 2}
+            )
+            return self.get_paginated_response(serializer.data)
+
+        serializer = ThreadedMessageSerializer(
+            unread_messages,
+            many=True,
+            context={'request': request, 'max_depth': 2}
+        )
+        return Response(serializer.data)
+
+    @action(detail=False, methods=['get'])
+    def unread_count(self, request):
+        """
+        Get the count of unread messages for the current user
+        """
+        count = Message.unread.unread_count_for_user(request.user)
+        return Response({'unread_count': count})
+
+    @action(detail=False, methods=['post'])
+    def mark_as_read(self, request):
+        """
+        Mark messages as read for the current user
+        """
+        message_ids = request.data.get('message_ids', [])
+
+        if message_ids:
+            # Mark specific messages as read
+            updated_count = Message.unread.mark_as_read(
+                request.user, message_ids)
+        else:
+            # Mark all unread messages as read
+            updated_count = Message.unread.mark_as_read(request.user)
+
+        return Response({
+            'message': f'Successfully marked {updated_count} messages as read',
+            'updated_count': updated_count
+        })
+
+    @action(detail=True, methods=['post'])
+    def mark_single_as_read(self, request, pk=None):
+        """
+        Mark a single message as read
+        """
+        try:
+            message = Message.objects.get(message_id=pk)
+
+            # Check if user has access to this message
+            if not message.conversation.participants.filter(user_id=request.user.user_id).exists():
+                return Response(
+                    {'error': 'Access denied'},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+
+            if message.unread:
+                message.mark_as_read()
+                return Response({'message': 'Message marked as read'})
+            else:
+                return Response({'message': 'Message was already read'})
+
+        except Message.DoesNotExist:
+            return Response(
+                {'error': 'Message not found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
     @action(detail=False, methods=['get'], url_path='conversation/(?P<conversation_id>[^/.]+)')
     def conversation_messages(self, request, conversation_id=None):
         """

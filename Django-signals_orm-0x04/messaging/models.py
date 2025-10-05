@@ -4,6 +4,7 @@ from django.db import models
 from django.contrib.auth.models import AbstractBaseUser
 from django.utils import timezone
 from django.db.models import Q
+from .managers import UnreadMessagesManager, ThreadedMessageManager
 
 
 class User(AbstractBaseUser):
@@ -36,7 +37,7 @@ class Conversation(models.Model):
         primary_key=True, default=uuid.uuid4, editable=False, db_index=True)
     participants = models.ManyToManyField(User, related_name='conversations')
     created_at = models.DateTimeField(auto_now_add=True)
-    last_activity = models.DateTimeField(auto_now=True)  # Track last activity
+    last_activity = models.DateTimeField(auto_now=True)
 
     class Meta:
         db_table = 'conversation'
@@ -72,9 +73,16 @@ class Message(models.Model):
 
     content = models.TextField()
     timestamp = models.DateTimeField(auto_now_add=True)
-    is_read = models.BooleanField(default=False)
+
+    # Rename is_read to read as requested and add unread property
+    read = models.BooleanField(default=False)  # Changed from is_read to read
+
     edited = models.BooleanField(default=False)
     edited_at = models.DateTimeField(null=True, blank=True)
+
+    # Custom managers
+    objects = ThreadedMessageManager()  # Default manager
+    unread = UnreadMessagesManager()    # Custom manager for unread messages
 
     class Meta:
         db_table = 'message'
@@ -83,12 +91,23 @@ class Message(models.Model):
             models.Index(
                 fields=['conversation', 'parent_message', 'timestamp']),
             models.Index(fields=['parent_message']),
+            models.Index(fields=['read']),  # Index for better unread queries
         ]
 
     def __str__(self):
         thread_info = f" (reply to {self.parent_message.message_id})" if self.parent_message else ""
         edited_indicator = " (edited)" if self.edited else ""
         return f"Message from {self.sender.email} at {self.timestamp}{thread_info}{edited_indicator}"
+
+    @property
+    def is_read(self):
+        """Backward compatibility property"""
+        return self.read
+
+    @property
+    def unread(self):
+        """Convenience property to check if message is unread"""
+        return not self.read
 
     def save(self, *args, **kwargs):
         # Auto-set receiver if not provided (for one-on-one conversations)
@@ -124,6 +143,16 @@ class Message(models.Model):
             if depth > 100:  # Safety limit to prevent infinite loops
                 break
         return depth
+
+    def mark_as_read(self):
+        """Mark this message as read"""
+        self.read = True
+        self.save(update_fields=['read'])
+
+    def mark_as_unread(self):
+        """Mark this message as unread"""
+        self.read = False
+        self.save(update_fields=['read'])
 
 
 class MessageHistory(models.Model):
@@ -182,60 +211,3 @@ class Notification(models.Model):
     def mark_as_read(self):
         self.is_read = True
         self.save()
-
-# Custom managers for optimized queries
-
-
-class ThreadedMessageManager(models.Manager):
-    def get_queryset(self):
-        return super().get_queryset().select_related(
-            'sender',
-            'receiver',
-            'parent_message',
-            'parent_message__sender'
-        ).prefetch_related('replies')
-
-    def get_conversation_threads(self, conversation_id):
-        """
-        Get all root messages (non-replies) in a conversation with their reply threads
-        """
-        from django.db.models import Prefetch
-
-        # Prefetch replies recursively (up to a certain depth)
-        replies_prefetch = Prefetch(
-            'replies',
-            queryset=Message.objects.select_related('sender', 'receiver').prefetch_related(
-                Prefetch('replies', queryset=Message.objects.select_related(
-                    'sender', 'receiver'))
-            )
-        )
-
-        return self.filter(
-            conversation_id=conversation_id,
-            parent_message__isnull=True  # Root messages only
-        ).prefetch_related(replies_prefetch).order_by('timestamp')
-
-    def get_message_with_thread(self, message_id):
-        """
-        Get a specific message with its entire reply thread
-        """
-        from django.db.models import Prefetch
-
-        # Prefetch all replies recursively
-        def get_replies_prefetch():
-            return Prefetch(
-                'replies',
-                queryset=Message.objects.select_related('sender', 'receiver').prefetch_related(
-                    get_replies_prefetch()
-                )
-            )
-
-        return self.select_related(
-            'sender', 'receiver', 'parent_message', 'parent_message__sender'
-        ).prefetch_related(
-            get_replies_prefetch()
-        ).get(message_id=message_id)
-
-
-# Attach the custom manager to Message model
-Message.objects = ThreadedMessageManager()
