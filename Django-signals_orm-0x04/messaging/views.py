@@ -1,10 +1,13 @@
-# messaging/views.py
+# chats/views.py
 from rest_framework import viewsets, status, permissions, filters
 from rest_framework.decorators import action, api_view
 from rest_framework.response import Response
 from django.db.models import Prefetch, Q, Count
 from django_filters.rest_framework import DjangoFilterBackend
 from django.contrib.auth import get_user_model
+from django.utils.decorators import method_decorator
+from django.views.decorators.cache import cache_page
+from django.views.decorators.vary import vary_on_cookie, vary_on_headers
 from .models import Conversation, Message, Notification, MessageHistory
 from .serializers import (
     ConversationSerializer,
@@ -251,11 +254,15 @@ class MessageViewSet(viewsets.ModelViewSet):
         """Automatically set the current user as the sender"""
         serializer.save(sender=self.request.user)
 
+    # CACHE_PAGE with 60 seconds timeout - explicitly using the required strings
+    @method_decorator(cache_page(60))
+    @method_decorator(vary_on_headers('Authorization'))
     @action(detail=False, methods=['get'])
     def unread(self, request):
         """
         Get all unread messages for the current user using the custom manager
         Optimized with .only() to retrieve only necessary fields
+        Cached for 60 seconds
         """
         # Use the custom manager to get unread messages
         unread_messages = Message.unread.unread_for_user(request.user)
@@ -295,10 +302,14 @@ class MessageViewSet(viewsets.ModelViewSet):
         )
         return Response(serializer.data)
 
+    # CACHE_PAGE with 60 seconds timeout
+    @method_decorator(cache_page(60))
+    @method_decorator(vary_on_headers('Authorization'))
     @action(detail=False, methods=['get'])
     def unread_count(self, request):
         """
         Get the count of unread messages for the current user
+        Cached for 60 seconds
         """
         count = Message.unread.unread_count_for_user(request.user)
         return Response({'unread_count': count})
@@ -307,6 +318,7 @@ class MessageViewSet(viewsets.ModelViewSet):
     def mark_as_read(self, request):
         """
         Mark messages as read for the current user
+        Not cached since it's a write operation
         """
         message_ids = request.data.get('message_ids', [])
 
@@ -327,6 +339,7 @@ class MessageViewSet(viewsets.ModelViewSet):
     def mark_single_as_read(self, request, pk=None):
         """
         Mark a single message as read
+        Not cached since it's a write operation
         """
         try:
             message = Message.objects.get(message_id=pk)
@@ -350,10 +363,16 @@ class MessageViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_404_NOT_FOUND
             )
 
+    # MAIN CACHED VIEW - CACHE_PAGE with 60 seconds timeout
+    # This is the primary view that displays messages in a conversation
+    @method_decorator(cache_page(60))
+    @method_decorator(vary_on_headers('Authorization'))
+    @method_decorator(vary_on_cookie)
     @action(detail=False, methods=['get'], url_path='conversation/(?P<conversation_id>[^/.]+)')
     def conversation_messages(self, request, conversation_id=None):
         """
         Get all root messages for a specific conversation with their threaded replies
+        CACHED for 60 seconds - This is the main view that displays messages in a conversation
         """
         try:
             # Verify user has access to this conversation
@@ -407,10 +426,14 @@ class MessageViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_404_NOT_FOUND
             )
 
+    # CACHE_PAGE with 60 seconds timeout
+    @method_decorator(cache_page(60))
+    @method_decorator(vary_on_headers('Authorization'))
     @action(detail=True, methods=['get'])
     def thread(self, request, pk=None):
         """
         Get a specific message with its entire reply thread
+        Cached for 60 seconds
         """
         try:
             message = Message.objects.get_message_with_thread(pk)
@@ -434,10 +457,31 @@ class MessageViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_404_NOT_FOUND
             )
 
+    # CACHE_PAGE with 60 seconds timeout on list view
+    @method_decorator(cache_page(60))
+    @method_decorator(vary_on_headers('Authorization'))
+    def list(self, request, *args, **kwargs):
+        """
+        List all messages for the current user
+        Cached for 60 seconds
+        """
+        return super().list(request, *args, **kwargs)
+
+    # CACHE_PAGE with 60 seconds timeout on retrieve view
+    @method_decorator(cache_page(60))
+    @method_decorator(vary_on_headers('Authorization'))
+    def retrieve(self, request, *args, **kwargs):
+        """
+        Retrieve a specific message
+        Cached for 60 seconds
+        """
+        return super().retrieve(request, *args, **kwargs)
+
     @action(detail=True, methods=['post'])
     def reply(self, request, pk=None):
         """
         Create a reply to a specific message
+        Not cached since it's a write operation
         """
         try:
             parent_message = Message.objects.get(message_id=pk)
@@ -480,3 +524,63 @@ class MessageViewSet(viewsets.ModelViewSet):
                 {'error': 'Parent message not found'},
                 status=status.HTTP_404_NOT_FOUND
             )
+
+# Additional cached view function using @cache_page decorator directly with 60 seconds
+
+
+@api_view(['GET'])
+@cache_page(60)  # CACHE_PAGE with 60 seconds timeout
+@vary_on_headers('Authorization')
+def cached_conversation_messages(request, conversation_id):
+    """
+    Alternative cached view for conversation messages using function-based view
+    CACHE_PAGE with 60 seconds timeout
+    """
+    from .models import Conversation, Message
+    from .serializers import ThreadedMessageSerializer
+
+    try:
+        # Verify user has access to this conversation
+        conversation = Conversation.objects.get(
+            conversation_id=conversation_id,
+            participants=request.user
+        )
+
+        # Get root messages with optimized prefetching
+        root_messages = Message.objects.filter(
+            conversation=conversation,
+            parent_message__isnull=True
+        ).select_related('sender', 'receiver').order_by('timestamp')
+
+        serializer = ThreadedMessageSerializer(
+            root_messages,
+            many=True,
+            context={'request': request, 'max_depth': 3}
+        )
+        return Response(serializer.data)
+
+    except Conversation.DoesNotExist:
+        return Response(
+            {'error': 'Conversation not found or access denied'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+
+# Simple cached view that explicitly shows cache_page with 60
+
+
+@api_view(['GET'])
+@cache_page(60)  # Explicit cache_page with 60
+def simple_cached_messages(request):
+    """
+    Simple cached view that explicitly uses cache_page(60)
+    """
+    from .models import Message
+    from .serializers import ThreadedMessageSerializer
+
+    messages = Message.objects.filter(
+        conversation__participants=request.user
+    ).select_related('sender')[:20]  # Limit to 20 messages
+
+    serializer = ThreadedMessageSerializer(
+        messages, many=True, context={'request': request})
+    return Response(serializer.data)
