@@ -9,7 +9,7 @@ from .models import Conversation, Message, Notification, MessageHistory
 from .serializers import (
     ConversationSerializer,
     ConversationDetailSerializer,
-    MessageSerializer,
+    ThreadedMessageSerializer,
     MessageCreateSerializer,
     UserSerializer
 )
@@ -20,8 +20,6 @@ import logging
 
 logger = logging.getLogger(__name__)
 User = get_user_model()
-
-# Create a dedicated delete_user view function
 
 
 @api_view(['POST'])
@@ -164,8 +162,8 @@ class ConversationViewSet(viewsets.ModelViewSet):
     filterset_class = ConversationFilter
     search_fields = ['participants__first_name',
                      'participants__last_name', 'participants__email']
-    ordering_fields = ['created_at', 'last_message_time']
-    ordering = ['-created_at']
+    ordering_fields = ['created_at', 'last_activity']
+    ordering = ['-last_activity']
     pagination_class = ConversationPagination
 
     def get_serializer_class(self):
@@ -176,18 +174,23 @@ class ConversationViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         """
         Return only conversations where the current user is a participant
+        Optimized with prefetch_related and select_related
         """
-        messages_prefetch = Prefetch(
+        # Prefetch participants and last message efficiently
+        participants_prefetch = Prefetch('participants')
+
+        # Prefetch the last message with sender info
+        last_message_prefetch = Prefetch(
             'messages',
             queryset=Message.objects.select_related(
-                'sender').order_by('-timestamp')
+                'sender').order_by('-timestamp')[:1]
         )
 
         queryset = Conversation.objects.filter(
             participants=self.request.user
         ).prefetch_related(
-            'participants',
-            messages_prefetch
+            participants_prefetch,
+            last_message_prefetch
         ).annotate(
             participants_count=Count('participants')
         ).distinct()
@@ -207,7 +210,7 @@ class ConversationViewSet(viewsets.ModelViewSet):
 
 class MessageViewSet(viewsets.ModelViewSet):
     """
-    ViewSet for listing, retrieving, and creating messages.
+    ViewSet for listing, retrieving, and creating messages with threaded replies.
     Users can only see messages from conversations they are participants in.
     """
     permission_classes = [permissions.IsAuthenticated,
@@ -223,15 +226,19 @@ class MessageViewSet(viewsets.ModelViewSet):
     def get_serializer_class(self):
         if self.action in ['create', 'update', 'partial_update']:
             return MessageCreateSerializer
-        return MessageSerializer
+        return ThreadedMessageSerializer
 
     def get_queryset(self):
         """
         Return only messages from conversations where the current user is a participant
+        Optimized with select_related and prefetch_related for threaded conversations
         """
+        # Use the custom manager for optimized queries
         queryset = Message.objects.filter(
             conversation__participants=self.request.user
-        ).select_related('sender', 'conversation', 'conversation__participants')
+        ).select_related(
+            'sender', 'receiver', 'parent_message', 'conversation'
+        )
 
         return queryset
 
@@ -247,7 +254,7 @@ class MessageViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'], url_path='conversation/(?P<conversation_id>[^/.]+)')
     def conversation_messages(self, request, conversation_id=None):
         """
-        Custom action to get all messages for a specific conversation with pagination
+        Get all root messages for a specific conversation with their threaded replies
         """
         try:
             # Verify user has access to this conversation
@@ -256,27 +263,121 @@ class MessageViewSet(viewsets.ModelViewSet):
                 participants=request.user
             )
 
-            # Apply filtering and pagination
-            queryset = Message.objects.filter(
-                conversation=conversation
-            ).select_related('sender').order_by('-timestamp')
+            # Get root messages (non-replies) with optimized prefetching
+            root_messages = Message.objects.filter(
+                conversation=conversation,
+                parent_message__isnull=True
+            ).select_related(
+                'sender', 'receiver'
+            ).prefetch_related(
+                Prefetch(
+                    'replies',
+                    queryset=Message.objects.select_related('sender', 'receiver').prefetch_related(
+                        Prefetch(
+                            'replies',
+                            queryset=Message.objects.select_related(
+                                'sender', 'receiver')
+                        )
+                    )
+                )
+            ).order_by('timestamp')
 
             # Apply filters
-            queryset = MessageFilter(request.GET, queryset=queryset).qs
+            queryset = MessageFilter(request.GET, queryset=root_messages).qs
 
             # Paginate the results
             page = self.paginate_queryset(queryset)
             if page is not None:
-                serializer = MessageSerializer(
-                    page, many=True, context={'request': request})
+                serializer = ThreadedMessageSerializer(
+                    page,
+                    many=True,
+                    context={'request': request, 'max_depth': 3}
+                )
                 return self.get_paginated_response(serializer.data)
 
-            serializer = MessageSerializer(
-                queryset, many=True, context={'request': request})
+            serializer = ThreadedMessageSerializer(
+                queryset,
+                many=True,
+                context={'request': request, 'max_depth': 3}
+            )
             return Response(serializer.data)
 
         except Conversation.DoesNotExist:
             return Response(
                 {'error': 'Conversation not found or access denied'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+    @action(detail=True, methods=['get'])
+    def thread(self, request, pk=None):
+        """
+        Get a specific message with its entire reply thread
+        """
+        try:
+            message = Message.objects.get_message_with_thread(pk)
+
+            # Check if user has access to this message's conversation
+            if not message.conversation.participants.filter(user_id=request.user.user_id).exists():
+                return Response(
+                    {'error': 'Access denied'},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+
+            serializer = ThreadedMessageSerializer(
+                message,
+                context={'request': request, 'max_depth': 10}
+            )
+            return Response(serializer.data)
+
+        except Message.DoesNotExist:
+            return Response(
+                {'error': 'Message not found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+    @action(detail=True, methods=['post'])
+    def reply(self, request, pk=None):
+        """
+        Create a reply to a specific message
+        """
+        try:
+            parent_message = Message.objects.get(message_id=pk)
+
+            # Check if user has access to this message's conversation
+            if not parent_message.conversation.participants.filter(user_id=request.user.user_id).exists():
+                return Response(
+                    {'error': 'Access denied'},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+
+            serializer = MessageCreateSerializer(data=request.data)
+            if serializer.is_valid():
+                # Ensure the reply is in the same conversation as the parent
+                reply_data = serializer.validated_data
+                if reply_data.get('conversation') != parent_message.conversation:
+                    return Response(
+                        {'error': 'Reply must be in the same conversation'},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+
+                # Create the reply
+                reply = Message.objects.create(
+                    conversation=parent_message.conversation,
+                    sender=request.user,
+                    parent_message=parent_message,
+                    content=reply_data['content']
+                )
+
+                response_serializer = ThreadedMessageSerializer(
+                    reply,
+                    context={'request': request}
+                )
+                return Response(response_serializer.data, status=status.HTTP_201_CREATED)
+
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        except Message.DoesNotExist:
+            return Response(
+                {'error': 'Parent message not found'},
                 status=status.HTTP_404_NOT_FOUND
             )
