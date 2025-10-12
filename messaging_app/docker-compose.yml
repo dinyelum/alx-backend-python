@@ -6,14 +6,14 @@ services:
     container_name: mysql_db
     restart: always
     environment:
-      MYSQL_DB: ${MYSQL_DATABASE} # Changed from MYSQL_DATABASE to MYSQL_DB
+      MYSQL_DB: ${MYSQL_DATABASE}
       MYSQL_USER: ${MYSQL_USER}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD}
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
     ports:
       - "3306:3306"
     volumes:
-      - mysql_data:/var/lib/mysql
+      - mysql_data:/var/lib/mysql # Named volume for persistence
     networks:
       - app_network
 
@@ -24,7 +24,7 @@ services:
     command: >
       sh -c "python manage.py wait_for_db &&
              python manage.py migrate &&
-             python3 manage.py runserver 0.0.0.0:8000"  # Changed to python3
+             python3 manage.py runserver 0.0.0.0:8000"
     volumes:
       - .:/app
     ports:
@@ -41,8 +41,5 @@ services:
 
 volumes:
   mysql_data:
-
-
-networks:
-  app_network:
-    driver: bridge
+    # Define the named volume
+    driver: local
