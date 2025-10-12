@@ -1,2 +1,8 @@
-__pycache__/
 .env
+*.pyc
+__pycache__
+*.sqlite3
+db.sqlite3
+.DS_Store
+.env.local
+.env.prod

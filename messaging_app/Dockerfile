@@ -8,10 +8,11 @@ ENV PYTHONUNBUFFERED 1
 # Set work directory
 WORKDIR /app
 
-# Install system dependencies
+# Install system dependencies including MySQL client
 RUN apt-get update && apt-get install -y \
     gcc \
-    postgresql-dev \
+    default-libmysqlclient-dev \
+    pkg-config \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements file
@@ -26,6 +27,3 @@ COPY . .
 
 # Expose port 8000
 EXPOSE 8000
-
-# Run migrations and start server WITH -p flag
-CMD ["sh", "-c", "python manage.py migrate && python manage.py runserver -p 8000"]
