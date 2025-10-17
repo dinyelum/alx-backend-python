@@ -1,0 +1,176 @@
+#!/bin/bash
+
+# kubctl-0x01 - Kubernetes Scaling and Load Testing Script
+# This script scales the Django app and performs load testing
+
+set -e  # Exit on any error
+
+echo "=========================================="
+echo "Kubernetes Scaling and Load Testing Script"
+echo "=========================================="
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Color
+
+# Function to check if a command exists
+command_exists() {
+    command -v "$1" >/dev/null 2>&1
+}
+
+# Function to print colored output
+print_status() {
+    echo -e "${GREEN}[INFO]${NC} $1"
+}
+
+print_warning() {
+    echo -e "${YELLOW}[WARNING]${NC} $1"
+}
+
+print_error() {
+    echo -e "${RED}[ERROR]${NC} $1"
+}
+
+# Check prerequisites
+print_status "Checking prerequisites..."
+
+if ! command_exists kubectl; then
+    print_error "kubectl is not installed. Please install kubectl first."
+    exit 1
+fi
+
+if ! command_exists wrk; then
+    print_warning "wrk is not installed. Installing wrk..."
+    
+    # Install wrk based on the OS
+    if [[ "$OSTYPE" == "linux-gnu"* ]]; then
+        sudo apt-get update
+        sudo apt-get install -y wrk
+    elif [[ "$OSTYPE" == "darwin"* ]]; then
+        brew install wrk
+    else
+        print_error "Unsupported OS. Please install wrk manually."
+        exit 1
+    fi
+fi
+
+# Check if metrics-server is installed (required for kubectl top)
+print_status "Checking if metrics-server is installed..."
+if ! kubectl top nodes 2>/dev/null; then
+    print_warning "metrics-server not found. Installing metrics-server..."
+    
+    # Install metrics-server
+    kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
+    
+    # Wait for metrics-server to be ready
+    print_status "Waiting for metrics-server to be ready..."
+    kubectl wait --for=condition=available deployment/metrics-server -n kube-system --timeout=180s
+fi
+
+# Get current deployment status
+print_status "Current deployment status:"
+kubectl get deployment django-messaging-app
+
+# Get current pods
+print_status "Current pods:"
+kubectl get pods -l app=django-messaging-app
+
+# Scale the deployment to 3 replicas
+print_status "Scaling deployment to 3 replicas..."
+kubectl scale deployment django-messaging-app --replicas=3
+
+# Wait for pods to be ready
+print_status "Waiting for all pods to be ready..."
+kubectl wait --for=condition=ready pod -l app=django-messaging-app --timeout=120s
+
+# Verify scaling
+print_status "Verifying scaling - current pods:"
+kubectl get pods -l app=django-messaging-app
+
+# Get service details for load testing
+print_status "Getting service details..."
+SERVICE_NAME="django-service"
+SERVICE_PORT=$(kubectl get service $SERVICE_NAME -o jsonpath='{.spec.ports[0].port}')
+
+# Port forward the service for load testing
+print_status "Setting up port forwarding for load testing..."
+kubectl port-forward service/$SERVICE_NAME 8000:8000 > /dev/null 2>&1 &
+PORT_FORWARD_PID=$!
+
+# Wait for port forwarding to be established
+sleep 5
+
+# Function to perform load testing
+perform_load_test() {
+    local test_name=$1
+    local threads=$2
+    local connections=$3
+    local duration=$4
+    
+    print_status "Performing $test_name load test..."
+    echo "Threads: $threads, Connections: $connections, Duration: ${duration}s"
+    
+    wrk -t$threads -c$connections -d${duration}s --latency http://localhost:8000/api/health/
+    echo "----------------------------------------"
+}
+
+# Check if the app is responding
+print_status "Testing basic app connectivity..."
+if curl -s http://localhost:8000/api/health/ > /dev/null; then
+    print_status "App is responding. Starting load tests..."
+else
+    print_error "App is not responding. Please check if the deployment is working."
+    kill $PORT_FORWARD_PID 2>/dev/null
+    exit 1
+fi
+
+# Monitor resource usage before load test
+print_status "Resource usage before load test:"
+echo "=== PODS RESOURCE USAGE ==="
+kubectl top pods -l app=django-messaging-app
+
+echo "=== NODES RESOURCE USAGE ==="
+kubectl top nodes
+
+# Perform load testing
+print_status "Starting load testing sequence..."
+
+# Test 1: Light load
+perform_load_test "light" 2 10 30
+
+# Test 2: Medium load
+perform_load_test "medium" 4 20 30
+
+# Test 3: Heavy load
+perform_load_test "heavy" 8 50 30
+
+# Monitor resource usage after load test
+print_status "Resource usage after load test:"
+echo "=== PODS RESOURCE USAGE ==="
+kubectl top pods -l app=django-messaging-app
+
+echo "=== NODES RESOURCE USAGE ==="
+kubectl top nodes
+
+# Stop port forwarding
+kill $PORT_FORWARD_PID 2>/dev/null
+
+# Final status
+print_status "Final deployment status:"
+kubectl get deployment django-messaging-app
+
+print_status "Final pods status:"
+kubectl get pods -l app=django-messaging-app
+
+# Display scaling information
+print_status "Scaling summary:"
+echo "Deployment: django-messaging-app"
+echo "Current replicas: $(kubectl get deployment django-messaging-app -o jsonpath='{.status.readyReplicas}')"
+echo "Desired replicas: $(kubectl get deployment django-messaging-app -o jsonpath='{.spec.replicas}')"
+
+echo ""
+echo "=========================================="
+echo "Scaling and load testing completed!"
+echo "=========================================="
