@@ -19,7 +19,7 @@ spec:
     spec:
       containers:
       - name: django-app
-        image: django-messaging-app:blue
+        image: django-messaging-app:2.0  # Updated to version 2.0
         ports:
         - containerPort: 8000
         env:
@@ -46,19 +46,26 @@ spec:
               name: django-secrets
               key: secret-key
         - name: APP_VERSION
-          value: "blue-v1.0.0"
+          value: "blue-v2.0.0"  # Updated version
         readinessProbe:
           httpGet:
             path: /api/health/
             port: 8000
           initialDelaySeconds: 15
           periodSeconds: 5
+          failureThreshold: 3
         livenessProbe:
           httpGet:
             path: /api/health/
             port: 8000
           initialDelaySeconds: 20
           periodSeconds: 10
+          failureThreshold: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
 ---
 apiVersion: v1
 kind: Service
