@@ -1,0 +1,23 @@
+# Install Nginx Ingress Controller
+kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.8.2/deploy/static/provider/cloud/deploy.yaml
+
+# Wait for Ingress Controller to be ready
+kubectl wait --namespace ingress-nginx --for=condition=ready pod --selector=app.kubernetes.io/component=controller --timeout=120s
+
+# Apply the Ingress configuration
+kubectl apply -f ingress.yaml
+
+# Verify Ingress resources
+kubectl get ingress
+
+# Check Ingress controller pods
+kubectl get pods -n ingress-nginx
+
+# Get Ingress service details
+kubectl get svc -n ingress-nginx
+
+# Update local hosts file to test domains (Linux/Mac)
+echo "127.0.0.1 django-app.local api.django-app.local" | sudo tee -a /etc/hosts
+
+# Port forward to access Ingress locally
+kubectl port-forward --namespace=ingress-nginx service/ingress-nginx-controller 8080:80
