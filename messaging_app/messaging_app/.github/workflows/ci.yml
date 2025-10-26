@@ -1,0 +1,165 @@
+# messaging_app/.github/workflows/ci.yml
+name: Django CI
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: test_messaging_db
+          MYSQL_USER: test_user
+          MYSQL_PASSWORD: test_password
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=3
+
+    strategy:
+      matrix:
+        python-version: [3.8, 3.9, '3.10']
+
+    env:
+      DATABASE_URL: mysql://test_user:test_password@localhost:3306/test_messaging_db
+      SECRET_KEY: test-secret-key-for-ci
+      DEBUG: 1
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y default-libmysqlclient-dev build-essential pkg-config
+
+    - name: Install Python dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r messaging_app/requirements.txt
+        pip install pytest pytest-django pytest-cov coverage
+
+    - name: Wait for MySQL to be ready
+      run: |
+        while ! mysqladmin ping -h"127.0.0.1" -P3306 -u"test_user" -p"test_password" --silent; do
+          echo "Waiting for MySQL..."
+          sleep 2
+        done
+        echo "MySQL is ready!"
+
+    - name: Create test database
+      run: |
+        mysql -h 127.0.0.1 -P 3306 -u test_user -ptest_password -e "CREATE DATABASE IF NOT EXISTS test_messaging_db;"
+
+    - name: Run migrations
+      run: |
+        cd messaging_app
+        python manage.py makemigrations --check --dry-run
+        python manage.py makemigrations
+        python manage.py migrate
+
+    - name: Run tests with pytest
+      run: |
+        cd messaging_app
+        python -m pytest \
+          --cov=. \
+          --cov-report=xml \
+          --cov-report=html \
+          --junitxml=test-results.xml \
+          -v
+
+    - name: Upload coverage reports
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./messaging_app/coverage.xml
+        flags: unittests
+        name: codecov-umbrella
+
+    - name: Upload test results
+      uses: actions/upload-artifact@v4
+      with:
+        name: test-results-${{ matrix.python-version }}
+        path: |
+          messaging_app/test-results.xml
+          messaging_app/htmlcov/
+        retention-days: 30
+
+  lint:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+
+    - name: Install linting tools
+      run: |
+        python -m pip install --upgrade pip
+        pip install flake8 black isort
+
+    - name: Check code formatting with black
+      run: |
+        black --check messaging_app/
+
+    - name: Check import sorting with isort
+      run: |
+        isort --check-only --diff messaging_app/
+
+    - name: Lint with flake8
+      run: |
+        flake8 messaging_app/ --max-line-length=88 --extend-ignore=E203,W503
+
+  security:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+
+    - name: Install security tools
+      run: |
+        python -m pip install --upgrade pip
+        pip install bandit safety
+
+    - name: Run bandit security scan
+      run: |
+        bandit -r messaging_app/ -f html -o bandit-report.html || true
+
+    - name: Run safety check
+      run: |
+        safety check --json --output safety-report.json || true
+
+    - name: Upload security reports
+      uses: actions/upload-artifact@v4
+      with:
+        name: security-reports
+        path: |
+          bandit-report.html
+          safety-report.json
+        retention-days: 30
