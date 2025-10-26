@@ -75,22 +75,25 @@ jobs:
         python manage.py makemigrations
         python manage.py migrate
 
-    - name: Run tests with pytest
+    - name: Run tests with pytest and generate coverage reports
       run: |
         cd messaging_app
         python -m pytest \
           --cov=. \
-          --cov-report=xml \
-          --cov-report=html \
+          --cov-report=xml:coverage.xml \
+          --cov-report=html:coverage-html \
+          --cov-report=term-missing \
           --junitxml=test-results.xml \
           -v
 
-    - name: Upload coverage reports
-      uses: codecov/codecov-action@v3
+    - name: Upload test coverage reports
+      uses: actions/upload-artifact@v4
       with:
-        file: ./messaging_app/coverage.xml
-        flags: unittests
-        name: codecov-umbrella
+        name: coverage-reports-${{ matrix.python-version }}
+        path: |
+          messaging_app/coverage.xml
+          messaging_app/coverage-html/
+        retention-days: 30
 
     - name: Upload test results
       uses: actions/upload-artifact@v4
@@ -98,40 +101,147 @@ jobs:
         name: test-results-${{ matrix.python-version }}
         path: |
           messaging_app/test-results.xml
-          messaging_app/htmlcov/
         retention-days: 30
 
-  lint:
+    - name: Upload to Codecov
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./messaging_app/coverage.xml
+        flags: unittests
+        name: codecov-umbrella
+
+  code-quality:
     runs-on: ubuntu-latest
     
+    strategy:
+      matrix:
+        python-version: [3.9]
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
 
-    - name: Set up Python
+    - name: Set up Python ${{ matrix.python-version }}
       uses: actions/setup-python@v4
       with:
-        python-version: '3.9'
+        python-version: ${{ matrix.python-version }}
 
-    - name: Install linting tools
+    - name: Install code quality tools
       run: |
         python -m pip install --upgrade pip
-        pip install flake8 black isort
+        pip install flake8 black isort bandit safety
 
-    - name: Check code formatting with black
+    - name: Run flake8 linting
       run: |
-        black --check messaging_app/
+        # Run flake8 with strict settings - will fail the build if errors are found
+        flake8 messaging_app/ \
+          --max-line-length=88 \
+          --extend-ignore=E203,W503 \
+          --count \
+          --show-source \
+          --statistics \
+          --exit-zero > flake8-report.txt || true
+        
+        # Check if there are any errors and fail the build if so
+        if [ -s flake8-report.txt ]; then
+          echo "❌ Flake8 found linting errors:"
+          cat flake8-report.txt
+          echo "::error::Flake8 linting failed! Check the flake8-report.txt for details."
+          exit 1
+        else
+          echo "✅ No flake8 linting errors found!"
+        fi
 
-    - name: Check import sorting with isort
+    - name: Run black code formatting check
+      run: |
+        black --check messaging_app/ --verbose
+
+    - name: Run isort import sorting check
       run: |
         isort --check-only --diff messaging_app/
 
-    - name: Lint with flake8
+    - name: Run bandit security scan
       run: |
-        flake8 messaging_app/ --max-line-length=88 --extend-ignore=E203,W503
+        bandit -r messaging_app/ -f json -o bandit-report.json || true
 
-  security:
+    - name: Run safety dependency check
+      run: |
+        safety check --json --output safety-report.json || true
+
+    - name: Upload code quality reports
+      uses: actions/upload-artifact@v4
+      with:
+        name: code-quality-reports
+        path: |
+          flake8-report.txt
+          bandit-report.json
+          safety-report.json
+        retention-days: 30
+
+  coverage:
     runs-on: ubuntu-latest
+    needs: test
+    
+    strategy:
+      matrix:
+        python-version: [3.9]
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Download coverage artifacts
+      uses: actions/download-artifact@v4
+      with:
+        pattern: coverage-reports-*
+        path: coverage-reports
+
+    - name: Generate coverage summary
+      run: |
+        # Find the latest coverage.xml file
+        COVERAGE_FILE=$(find coverage-reports -name "coverage.xml" | head -1)
+        
+        if [ -n "$COVERAGE_FILE" ]; then
+          echo "📊 Coverage Report Summary:"
+          python -c "
+          import xml.etree.ElementTree as ET
+          tree = ET.parse('$COVERAGE_FILE')
+          root = tree.getroot()
+          coverage = root.attrib
+          lines_covered = int(coverage['lines-covered'])
+          lines_valid = int(coverage['lines-valid'])
+          coverage_percent = (lines_covered / lines_valid) * 100 if lines_valid > 0 else 0
+          print(f'Lines Covered: {lines_covered}/{lines_valid}')
+          print(f'Coverage Percentage: {coverage_percent:.2f}%')
+          
+          # Set coverage threshold (fail if below 80%)
+          if coverage_percent < 80:
+            print('❌ Coverage below 80% threshold!')
+            exit(1)
+          else:
+            print('✅ Coverage meets 80% threshold!')
+          "
+        else
+          echo "No coverage file found"
+          exit 1
+        fi
+
+    - name: Upload coverage summary
+      uses: actions/upload-artifact@v4
+      with:
+        name: coverage-summary
+        path: |
+          coverage-reports/
+        retention-days: 30
+
+  build:
+    runs-on: ubuntu-latest
+    needs: [test, code-quality, coverage]
     
     steps:
     - name: Checkout code
@@ -142,24 +252,33 @@ jobs:
       with:
         python-version: '3.9'
 
-    - name: Install security tools
+    - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install bandit safety
+        pip install -r messaging_app/requirements.txt
 
-    - name: Run bandit security scan
+    - name: Run migrations check
       run: |
-        bandit -r messaging_app/ -f html -o bandit-report.html || true
+        cd messaging_app
+        python manage.py makemigrations --check --dry-run
 
-    - name: Run safety check
+    - name: Collect static files
       run: |
-        safety check --json --output safety-report.json || true
+        cd messaging_app
+        python manage.py collectstatic --noinput
 
-    - name: Upload security reports
-      uses: actions/upload-artifact@v4
-      with:
-        name: security-reports
-        path: |
-          bandit-report.html
-          safety-report.json
-        retention-days: 30
+    - name: Success message
+      run: |
+        echo "🎉 All checks passed! Code quality, tests, and coverage are within acceptable ranges."
+
+# Add workflow-level conditions
+on:
+  push:
+    branches: [ main, develop, feature/* ]
+  pull_request:
+    branches: [ main, develop ]
+
+# Add concurrency to prevent multiple runs for the same commit
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
