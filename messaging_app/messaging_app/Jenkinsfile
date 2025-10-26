@@ -33,6 +33,11 @@ pipeline {
                             url: 'git@github.com:your-username/messaging_app.git' // Update with your repo URL
                         ]]
                     ])
+                    
+                    // Explicitly show git branch information
+                    sh 'git branch -a'
+                    sh 'git status'
+                    sh 'git log --oneline -5'
                 }
             }
         }
@@ -57,15 +62,17 @@ pipeline {
                     echo 'Installing Python dependencies...'
                     sh """
                         . ${VENV_DIR}/bin/activate
-                        pip install --upgrade pip
-                        pip install -r requirements.txt
+                        # Use pip3 install explicitly as requested
+                        pip3 install --upgrade pip
+                        # Install from messaging_app/requirements.txt explicitly
+                        pip3 install -r messaging_app/requirements.txt
                         # Install development dependencies if you have a dev-requirements.txt
-                        if [ -f dev-requirements.txt ]; then
-                            pip install -r dev-requirements.txt
+                        if [ -f messaging_app/dev-requirements.txt ]; then
+                            pip3 install -r messaging_app/dev-requirements.txt
                         fi
-                        # Install pytest and reporting tools
-                        pip install pytest pytest-django pytest-cov pytest-html
-                        pip install coverage
+                        # Install pytest and reporting tools using pip3
+                        pip3 install pytest pytest-django pytest-cov pytest-html
+                        pip3 install coverage
                     """
                 }
             }
@@ -138,8 +145,8 @@ pipeline {
                     echo 'Running security checks...'
                     sh """
                         . ${VENV_DIR}/bin/activate
-                        # Install and run bandit for security scanning
-                        pip install bandit
+                        # Install and run bandit for security scanning using pip3
+                        pip3 install bandit
                         bandit -r ${PROJECT_DIR} -f html -o bandit-report.html || true
                     """
                 }
@@ -164,12 +171,12 @@ pipeline {
                     echo 'Running code quality checks...'
                     sh """
                         . ${VENV_DIR}/bin/activate
-                        # Install and run flake8 for code quality
-                        pip install flake8
+                        # Install and run flake8 for code quality using pip3
+                        pip3 install flake8
                         flake8 ${PROJECT_DIR} --exit-zero > flake8-report.txt || true
                         
-                        # Install and run black for code formatting check
-                        pip install black
+                        # Install and run black for code formatting check using pip3
+                        pip3 install black
                         black --check ${PROJECT_DIR} > black-report.txt || true
                     """
                 }
@@ -208,11 +215,47 @@ pipeline {
                 script {
                     echo 'Building Docker image...'
                     sh """
+                        # Show current git branch before building
+                        git branch
                         # Build Docker image (if you have a Dockerfile)
                         if [ -f Dockerfile ]; then
                             docker build -t messaging-app:${BUILD_NUMBER} .
                             docker tag messaging-app:${BUILD_NUMBER} messaging-app:latest
                         fi
+                    """
+                }
+            }
+        }
+        
+        stage('Deploy to Staging') {
+            when {
+                branch 'develop'
+            }
+            steps {
+                script {
+                    echo 'Deploying to staging environment...'
+                    sh """
+                        echo "Current git branch:"
+                        git branch
+                        echo "Deploying version ${BUILD_NUMBER} to staging"
+                        # Add your deployment commands here
+                    """
+                }
+            }
+        }
+        
+        stage('Deploy to Production') {
+            when {
+                branch 'main'
+            }
+            steps {
+                script {
+                    echo 'Deploying to production environment...'
+                    sh """
+                        echo "Current git branch:"
+                        git branch
+                        echo "Deploying version ${BUILD_NUMBER} to production"
+                        # Add your deployment commands here
                     """
                 }
             }
@@ -223,6 +266,8 @@ pipeline {
         always {
             script {
                 echo 'Pipeline execution completed. Cleaning up...'
+                // Show final git branch status
+                sh 'git branch'
                 // Clean up virtual environment
                 sh 'rm -rf ${VENV_DIR} || true'
                 // Archive important artifacts
@@ -232,10 +277,12 @@ pipeline {
         success {
             script {
                 echo 'Pipeline executed successfully!'
+                // Show git branch in success message
+                sh 'git branch'
                 // You can add notifications here (Slack, Email, etc.)
                 emailext (
-                    subject: "SUCCESS: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]'",
-                    body: "The build ${env.BUILD_URL} completed successfully.",
+                    subject: "SUCCESS: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]' on branch $(git branch --show-current)",
+                    body: "The build ${env.BUILD_URL} completed successfully on branch $(git branch --show-current).",
                     to: "dev-team@yourcompany.com"
                 )
             }
@@ -243,10 +290,12 @@ pipeline {
         failure {
             script {
                 echo 'Pipeline execution failed!'
+                // Show git branch in failure message
+                sh 'git branch'
                 // Failure notifications
                 emailext (
-                    subject: "FAILED: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]'",
-                    body: "The build ${env.BUILD_URL} failed. Please check the build logs.",
+                    subject: "FAILED: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]' on branch $(git branch --show-current)",
+                    body: "The build ${env.BUILD_URL} failed on branch $(git branch --show-current). Please check the build logs.",
                     to: "dev-team@yourcompany.com"
                 )
             }
@@ -254,6 +303,8 @@ pipeline {
         unstable {
             script {
                 echo 'Pipeline execution marked as unstable!'
+                // Show git branch in unstable message
+                sh 'git branch'
                 // Unstable build notifications
             }
         }
