@@ -3,12 +3,16 @@ pipeline {
     agent any
     
     environment {
-        // Python version - adjust based on your project requirements
+        // Python version
         PYTHON_VERSION = '3.9'
         // Project directory
         PROJECT_DIR = 'messaging_app'
         // Virtual environment directory
         VENV_DIR = 'venv'
+        // Docker configuration
+        DOCKER_REGISTRY = 'docker.io'
+        DOCKER_IMAGE_NAME = 'your-dockerhub-username/messaging-app'
+        DOCKER_TAG = "${env.BUILD_NUMBER}"
     }
     
     options {
@@ -23,21 +27,19 @@ pipeline {
             steps {
                 script {
                     echo 'Checking out code from GitHub...'
-                    // Using SSH credentials for GitHub
                     checkout([
                         $class: 'GitSCM',
-                        branches: [[name: '*/main']], // Adjust branch as needed
+                        branches: [[name: '*/main']],
                         extensions: [],
                         userRemoteConfigs: [[
-                            credentialsId: 'github-ssh-key', // Credentials ID configured in Jenkins
-                            url: 'git@github.com:your-username/messaging_app.git' // Update with your repo URL
+                            credentialsId: 'github-ssh-key',
+                            url: 'git@github.com:your-username/messaging_app.git'
                         ]]
                     ])
                     
-                    // Explicitly show git branch information
+                    // Show git branch information
                     sh 'git branch -a'
                     sh 'git status'
-                    sh 'git log --oneline -5'
                 }
             }
         }
@@ -62,15 +64,11 @@ pipeline {
                     echo 'Installing Python dependencies...'
                     sh """
                         . ${VENV_DIR}/bin/activate
-                        # Use pip3 install explicitly as requested
                         pip3 install --upgrade pip
-                        # Install from messaging_app/requirements.txt explicitly
                         pip3 install -r messaging_app/requirements.txt
-                        # Install development dependencies if you have a dev-requirements.txt
                         if [ -f messaging_app/dev-requirements.txt ]; then
                             pip3 install -r messaging_app/dev-requirements.txt
                         fi
-                        # Install pytest and reporting tools using pip3
                         pip3 install pytest pytest-django pytest-cov pytest-html
                         pip3 install coverage
                     """
@@ -85,10 +83,8 @@ pipeline {
                     sh """
                         . ${VENV_DIR}/bin/activate
                         cd ${PROJECT_DIR}
-                        # Run migrations
                         python manage.py makemigrations
                         python manage.py migrate
-                        # Create test database if needed
                         python manage.py create_test_database || true
                     """
                 }
@@ -102,7 +98,6 @@ pipeline {
                     sh """
                         . ${VENV_DIR}/bin/activate
                         cd ${PROJECT_DIR}
-                        # Run tests with coverage and generate HTML report
                         pytest \
                             --cov=. \
                             --cov-report=html:coverage_html \
@@ -116,7 +111,6 @@ pipeline {
             }
             post {
                 always {
-                    // Always publish test results regardless of test status
                     publishHTML([
                         allowMissing: false,
                         alwaysLinkToLastBuild: true,
@@ -139,123 +133,106 @@ pipeline {
             }
         }
         
-        stage('Security Scan') {
-            steps {
-                script {
-                    echo 'Running security checks...'
-                    sh """
-                        . ${VENV_DIR}/bin/activate
-                        # Install and run bandit for security scanning using pip3
-                        pip3 install bandit
-                        bandit -r ${PROJECT_DIR} -f html -o bandit-report.html || true
-                    """
-                }
-            }
-            post {
-                always {
-                    publishHTML([
-                        allowMissing: true,
-                        alwaysLinkToLastBuild: true,
-                        keepAll: true,
-                        reportDir: 'bandit-report.html',
-                        reportFiles: 'bandit-report.html',
-                        reportName: 'Security Scan Report'
-                    ])
-                }
-            }
-        }
-        
-        stage('Code Quality') {
-            steps {
-                script {
-                    echo 'Running code quality checks...'
-                    sh """
-                        . ${VENV_DIR}/bin/activate
-                        # Install and run flake8 for code quality using pip3
-                        pip3 install flake8
-                        flake8 ${PROJECT_DIR} --exit-zero > flake8-report.txt || true
-                        
-                        # Install and run black for code formatting check using pip3
-                        pip3 install black
-                        black --check ${PROJECT_DIR} > black-report.txt || true
-                    """
-                }
-            }
-            post {
-                always {
-                    publishHTML([
-                        allowMissing: true,
-                        alwaysLinkToLastBuild: true,
-                        keepAll: true,
-                        reportDir: '.',
-                        reportFiles: 'flake8-report.txt',
-                        reportName: 'Flake8 Code Quality Report',
-                        reportTitles: ''
-                    ])
-                    publishHTML([
-                        allowMissing: true,
-                        alwaysLinkToLastBuild: true,
-                        keepAll: true,
-                        reportDir: '.',
-                        reportFiles: 'black-report.txt',
-                        reportName: 'Black Formatting Report',
-                        reportTitles: ''
-                    ])
-                }
-            }
-        }
-        
         stage('Build Docker Image') {
-            when {
-                expression { 
-                    return env.BRANCH_NAME == 'main' || env.BRANCH_NAME == 'develop'
-                }
-            }
             steps {
                 script {
                     echo 'Building Docker image...'
+                    // Show current git branch
+                    sh 'git branch'
+                    
+                    // Build the Docker image
                     sh """
-                        # Show current git branch before building
-                        git branch
-                        # Build Docker image (if you have a Dockerfile)
-                        if [ -f Dockerfile ]; then
-                            docker build -t messaging-app:${BUILD_NUMBER} .
-                            docker tag messaging-app:${BUILD_NUMBER} messaging-app:latest
-                        fi
+                        docker build -t ${DOCKER_IMAGE_NAME}:${DOCKER_TAG} .
+                        docker build -t ${DOCKER_IMAGE_NAME}:latest .
+                    """
+                    
+                    // List built images for verification
+                    sh 'docker images | grep ${DOCKER_IMAGE_NAME}'
+                }
+            }
+            post {
+                success {
+                    echo 'Docker image built successfully!'
+                    sh 'docker images ${DOCKER_IMAGE_NAME}'
+                }
+                failure {
+                    echo 'Docker image build failed!'
+                }
+            }
+        }
+        
+        stage('Test Docker Image') {
+            steps {
+                script {
+                    echo 'Testing Docker image...'
+                    // Run basic tests on the Docker image
+                    sh """
+                        # Test that the image can be run
+                        docker run --rm ${DOCKER_IMAGE_NAME}:${DOCKER_TAG} python --version
+                        
+                        # Test Django management commands
+                        docker run --rm ${DOCKER_IMAGE_NAME}:${DOCKER_TAG} python manage.py check --database default || true
+                        
+                        # Test that the application starts
+                        timeout 10s docker run --rm -p 8000:8000 ${DOCKER_IMAGE_NAME}:${DOCKER_TAG} &
+                        sleep 5
                     """
                 }
             }
         }
         
-        stage('Deploy to Staging') {
-            when {
-                branch 'develop'
-            }
+        stage('Push Docker Image') {
             steps {
                 script {
-                    echo 'Deploying to staging environment...'
-                    sh """
-                        echo "Current git branch:"
-                        git branch
-                        echo "Deploying version ${BUILD_NUMBER} to staging"
-                        # Add your deployment commands here
-                    """
+                    echo 'Pushing Docker image to Docker Hub...'
+                    
+                    // Login to Docker Hub using Jenkins credentials
+                    withCredentials([usernamePassword(
+                        credentialsId: 'docker-hub-credentials',
+                        usernameVariable: 'DOCKER_USERNAME',
+                        passwordVariable: 'DOCKER_PASSWORD'
+                    )]) {
+                        sh """
+                            echo \"Logging in to Docker Hub...\"
+                            echo \"${DOCKER_PASSWORD}\" | docker login -u \"${DOCKER_USERNAME}\" --password-stdin
+                            
+                            echo \"Pushing Docker images...\"
+                            docker push ${DOCKER_IMAGE_NAME}:${DOCKER_TAG}
+                            docker push ${DOCKER_IMAGE_NAME}:latest
+                            
+                            echo \"Logging out from Docker Hub...\"
+                            docker logout
+                        """
+                    }
+                }
+            }
+            post {
+                success {
+                    echo 'Docker image pushed successfully to Docker Hub!'
+                    script {
+                        // Display push confirmation
+                        sh """
+                            echo \"Successfully pushed:\"
+                            echo \"- ${DOCKER_IMAGE_NAME}:${DOCKER_TAG}\"
+                            echo \"- ${DOCKER_IMAGE_NAME}:latest\"
+                        """
+                    }
+                }
+                failure {
+                    echo 'Failed to push Docker image to Docker Hub!'
                 }
             }
         }
         
-        stage('Deploy to Production') {
-            when {
-                branch 'main'
-            }
+        stage('Cleanup') {
             steps {
                 script {
-                    echo 'Deploying to production environment...'
+                    echo 'Cleaning up Docker images...'
+                    // Remove local Docker images to save space
                     sh """
-                        echo "Current git branch:"
-                        git branch
-                        echo "Deploying version ${BUILD_NUMBER} to production"
-                        # Add your deployment commands here
+                        docker rmi ${DOCKER_IMAGE_NAME}:${DOCKER_TAG} || true
+                        docker rmi ${DOCKER_IMAGE_NAME}:latest || true
+                        docker image prune -f
                     """
                 }
             }
@@ -265,24 +242,31 @@ pipeline {
     post {
         always {
             script {
-                echo 'Pipeline execution completed. Cleaning up...'
+                echo 'Pipeline execution completed.'
                 // Show final git branch status
                 sh 'git branch'
                 // Clean up virtual environment
                 sh 'rm -rf ${VENV_DIR} || true'
                 // Archive important artifacts
-                archiveArtifacts artifacts: '**/test-results.xml, **/coverage.xml, **/*.html', fingerprint: true
+                archiveArtifacts artifacts: '**/test-results.xml, **/coverage.xml, **/*.html, **/Dockerfile', fingerprint: true
             }
         }
         success {
             script {
                 echo 'Pipeline executed successfully!'
-                // Show git branch in success message
-                sh 'git branch'
-                // You can add notifications here (Slack, Email, etc.)
+                // Success notification with Docker image info
                 emailext (
-                    subject: "SUCCESS: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]' on branch $(git branch --show-current)",
-                    body: "The build ${env.BUILD_URL} completed successfully on branch $(git branch --show-current).",
+                    subject: "SUCCESS: Docker Image Built - ${env.JOB_NAME} [${env.BUILD_NUMBER}]",
+                    body: """
+                    Build ${env.BUILD_URL} completed successfully!
+                    
+                    Docker Images Pushed:
+                    - ${DOCKER_IMAGE_NAME}:${DOCKER_TAG}
+                    - ${DOCKER_IMAGE_NAME}:latest
+                    
+                    You can pull the image using:
+                    docker pull ${DOCKER_IMAGE_NAME}:${DOCKER_TAG}
+                    """,
                     to: "dev-team@yourcompany.com"
                 )
             }
@@ -290,22 +274,12 @@ pipeline {
         failure {
             script {
                 echo 'Pipeline execution failed!'
-                // Show git branch in failure message
-                sh 'git branch'
-                // Failure notifications
+                // Failure notification
                 emailext (
-                    subject: "FAILED: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]' on branch $(git branch --show-current)",
-                    body: "The build ${env.BUILD_URL} failed on branch $(git branch --show-current). Please check the build logs.",
+                    subject: "FAILED: Docker Build - ${env.JOB_NAME} [${env.BUILD_NUMBER}]",
+                    body: "The Docker build ${env.BUILD_URL} failed. Please check the build logs.",
                     to: "dev-team@yourcompany.com"
                 )
-            }
-        }
-        unstable {
-            script {
-                echo 'Pipeline execution marked as unstable!'
-                // Show git branch in unstable message
-                sh 'git branch'
-                // Unstable build notifications
             }
         }
     }
